@@ -1,0 +1,40 @@
+[project]
+name = "automations-api"
+version = "0.1.0"
+description = "Production-ready FastAPI starter with Fernet-protected secrets"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0,<0.112.0",
+    "uvicorn[standard]>=0.27.0,<0.29.0",
+    "SQLAlchemy>=2.0.29,<2.1",
+    "pydantic>=2.6.4,<3.0",
+    "python-dotenv>=1.0.1,<2.0",
+    "cryptography>=41.0.7,<43.0",
+    "PyJWT>=2.8.0,<3.0",
+    "typer>=0.9.0,<0.11.0",
+]
+readme = "README.md"
+authors = [{name = "Automation Bot"}]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.1.1,<9.0",
+    "httpx>=0.26.0,<0.28.0",
+]
+
+[build-system]
+requires = ["setuptools>=67.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+target-version = ["py311"]
+line-length = 88
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I", "B", "UP", "N"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
