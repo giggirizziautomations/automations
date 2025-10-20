@@ -16,7 +16,7 @@ Stack FastAPI pronto per ambienti di produzione, progettato per crescere in ecos
 3. Copia l'ambiente di esempio: `cp .env.example .env` e compila i valori richiesti.
 4. Inizializza il database: `python -m app.db.init_db` oppure `./run.sh init-db`.
 5. Genera una chiave Fernet: `python -m app.cli.keygen` e imposta `FERNET_KEY` nel tuo `.env` o ambiente.
-6. Definisci il secret JWT (`JWT_SECRET`) e l'eventuale scadenza token (`ACCESS_TOKEN_EXPIRE_MINUTES`).
+6. Genera un secret JWT: `python -m app.cli.jwt_keygen` e imposta `JWT_SECRET` (ed eventuale `ACCESS_TOKEN_EXPIRE_MINUTES`).
 7. Crea un amministratore: `python -m app.cli.create_admin Nome Cognome email@example.com --password ****`.
 8. Crea un client credenziali: `python -m app.cli.create_client "Reporting" --scope reports:read`.
 9. Avvia il server di sviluppo: `uvicorn app.main:app --reload` oppure `./run.sh server`.
@@ -33,7 +33,8 @@ cp .env.example .env
 python -m app.db.init_db
 python -m app.cli.keygen
 export FERNET_KEY="$(cat .fernet.key)"
-export JWT_SECRET="sostituisci_con_secret_sicuro"
+python -m app.cli.jwt_keygen
+export JWT_SECRET="$(cat .jwt.secret)"
 python -m app.cli.create_admin "Nome" "Cognome" admin@example.com --password "Password123" --scopes "*"
 python -m app.cli.create_client "Reporting" --scope "reports:read"
 uvicorn app.main:app --reload
@@ -59,6 +60,7 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | ------- | ----------- |
 | `./run.sh init-db` | Crea le tabelle nel database |
 | `./run.sh keygen` | Genera e salva una chiave Fernet |
+| `./run.sh jwt-keygen` | Genera e salva un secret JWT |
 | `./run.sh create-admin ...` | Crea un utente amministratore |
 | `./run.sh create-client ...` | Crea un'applicazione client credential |
 | `./run.sh server` | Avvia Uvicorn in modalità reload |
