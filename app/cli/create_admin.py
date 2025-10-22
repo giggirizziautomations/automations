@@ -75,9 +75,13 @@ def _merge_scopes(option_scopes: Optional[Sequence[str]], argument_scopes: Seque
 )
 @click.option(
     "--scope",
+    "--scopes",
     "scope_option",
     multiple=True,
-    help="Scope da assegnare. Può essere specificato più volte o fornito come argomento posizionale.",
+    help=(
+        "Scope da assegnare. Può essere specificato più volte o fornito come argomento posizionale. "
+        "Sono accettati sia --scope che --scopes per retrocompatibilità."
+    ),
 )
 def create(
     name: str,
