@@ -18,7 +18,7 @@ Stack FastAPI pronto per ambienti di produzione, progettato per crescere in ecos
 5. Genera una chiave Fernet: `python -m app.cli.keygen` (verrà aggiunta automaticamente al tuo `.env`).
 6. Genera un secret JWT: `python -m app.cli.jwt_keygen` (verrà aggiunto automaticamente al tuo `.env`, insieme ad eventuali aggiornamenti di `JWT_SECRET`).
 7. Crea un amministratore: `python -m app.cli.create_admin Nome Cognome email@example.com --password ****`.
-8. Crea un client credenziali: `python -m app.cli.create_client "Reporting" --scope reports:read`.
+8. Crea un client credenziali: `python -m app.cli.create_client "Reporting" --client-id reporting-service --scope reports:read`.
 9. Avvia il server di sviluppo: `uvicorn app.main:app --reload` oppure `./run.sh server`.
 
 ### Sequenza comandi da tastiera
@@ -34,7 +34,7 @@ python -m app.db.init_db
 python -m app.cli.keygen
 python -m app.cli.jwt_keygen
 python -m app.cli.create_admin "Nome" "Cognome" admin@example.com --password "Password123" --scopes "*"
-python -m app.cli.create_client "Reporting" --scope "reports:read"
+python -m app.cli.create_client "Reporting" --client-id reporting-service --scope "reports:read"
 uvicorn app.main:app --reload
 ```
 
@@ -60,11 +60,15 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `./run.sh keygen` | Genera e salva una chiave Fernet |
 | `./run.sh jwt-keygen` | Genera e salva un secret JWT |
 | `./run.sh create-admin ...` | Crea un utente amministratore |
-| `./run.sh create-client ...` | Crea un'applicazione client credential |
+| `./run.sh create-client --client-id <id> --scope ...` | Crea un'applicazione client credential |
 | `./run.sh server` | Avvia Uvicorn in modalità reload |
 | `./run.sh test` | Esegue la suite di test con Pytest |
 
 Tutti i comandi sono invocabili anche con `python -m ...` se preferisci non usare lo script shell.
+
+> ℹ️ **Nuova istruzione:** per i client `client_credentials` fornisci sempre un `client_id` esplicito.
+> Il comando mostrerà il `client_secret` una sola volta: salvalo in modo sicuro perché
+> non potrà essere recuperato dal database in chiaro.
 
 ## Flussi di autenticazione
 
