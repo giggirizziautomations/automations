@@ -10,7 +10,7 @@ from typing import Mapping, MutableMapping
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_admin_or_scopes
 from app.core.config import Settings, get_settings
 from app.db import models
 from app.schemas import (
@@ -18,7 +18,11 @@ from app.schemas import (
     DeviceCodeInitiationResponse,
     DeviceTokenResponse,
 )
-from app.services import DeviceCodeLoginError, DeviceCodeLoginService
+from app.services import (
+    DeviceCodeLoginError,
+    DeviceCodeLoginService,
+    PlaywrightDeviceLoginAutomation,
+)
 
 
 router = APIRouter(prefix="/powerbi", tags=["powerbi"])
@@ -34,7 +38,7 @@ def _resolve_authority(tenant: str) -> str:
 
 
 def _build_device_login_service(
-    *, user: models.User, settings: Settings
+    *, user: models.User, settings: Settings, open_browser: bool | None = None
 ) -> DeviceCodeLoginService:
     """Construct a device login service using per-user configuration."""
 
@@ -60,11 +64,14 @@ def _build_device_login_service(
 
     token_cache_path = user.aad_token_cache_path or settings.msal_token_cache_path
 
+    if open_browser is None:
+        open_browser = settings.msal_open_browser
+
     return DeviceCodeLoginService(
         client_id=client_id,
         authority=_resolve_authority(tenant_id),
         scopes=settings.msal_scopes,
-        open_browser=settings.msal_open_browser,
+        open_browser=open_browser,
         token_cache_path=token_cache_path,
     )
 
@@ -198,6 +205,40 @@ async def complete_device_login(
             token_data = await run_in_threadpool(pending.service.acquire_token)
         except DeviceCodeLoginError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return DeviceTokenResponse.model_validate(dict(token_data))
+
+
+def get_playwright_device_automation(
+    user: models.User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> PlaywrightDeviceLoginAutomation:
+    """FastAPI dependency providing a Playwright-assisted device login runner."""
+
+    service = _build_device_login_service(
+        user=user,
+        settings=settings,
+        open_browser=False,
+    )
+    return PlaywrightDeviceLoginAutomation(service=service)
+
+
+@router.post(
+    "/device-login/playwright",
+    response_model=DeviceTokenResponse,
+    dependencies=[Depends(require_admin_or_scopes(["bi-user"]))],
+)
+async def playwright_device_login(
+    automation: PlaywrightDeviceLoginAutomation = Depends(
+        get_playwright_device_automation
+    ),
+) -> DeviceTokenResponse:
+    """Execute the device flow by driving a Playwright browser session."""
+
+    try:
+        token_data = await run_in_threadpool(automation.authenticate)
+    except DeviceCodeLoginError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return DeviceTokenResponse.model_validate(dict(token_data))
 

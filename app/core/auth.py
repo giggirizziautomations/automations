@@ -124,6 +124,28 @@ def require_scopes(required_scopes: Iterable[str]):
     return dependency
 
 
+def require_admin_or_scopes(required_scopes: Iterable[str]):
+    """Create a dependency granting access to admins or holders of scopes."""
+
+    required = set(normalize_scopes(list(required_scopes)))
+
+    async def dependency(principal: Principal = Depends(get_current_principal)) -> Principal:
+        if principal.is_admin:
+            return principal
+
+        principal_scopes = set(principal.scopes)
+        if required.intersection(principal_scopes):
+            return principal
+
+        scopes_description = " ".join(sorted(required))
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Missing required scopes: {scopes_description}",
+        )
+
+    return dependency
+
+
 async def get_current_user(
     principal: Principal = Depends(get_current_principal),
     db: Session = Depends(get_db),
@@ -148,6 +170,7 @@ __all__ = [
     "Principal",
     "get_current_principal",
     "get_current_user",
+    "require_admin_or_scopes",
     "require_admin",
     "require_scopes",
 ]
