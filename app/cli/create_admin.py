@@ -48,7 +48,9 @@ def create(
     password: str = typer.Option(
         ..., "--password", prompt=True, confirmation_prompt=True, hide_input=True
     ),
-    scope: List[str] = typer.Option(["*"], "--scope", help="Scope da assegnare"),
+    scope: List[str] = typer.Option(
+        ["*"], "--scope", "--scopes", help="Scope da assegnare"
+    ),
 ) -> None:
     """Create a new administrator user."""
 
