@@ -9,11 +9,20 @@ from app.services import DeviceCodeLoginError, DeviceCodeLoginService
 class _FakeClient:
     """Simple MSAL client stand-in used by the tests."""
 
-    def __init__(self, flow_response: dict, token_response: dict) -> None:
+    def __init__(
+        self,
+        flow_response: dict,
+        token_response: dict,
+        *,
+        accounts: list[dict] | None = None,
+        silent_response: dict | None = None,
+    ) -> None:
         self._flow_response = flow_response
         self._token_response = token_response
         self.initiated_with: list[list[str]] = []
         self.received_flow: list[dict] = []
+        self._accounts = accounts or []
+        self._silent_response = silent_response
 
     def initiate_device_flow(self, scopes: list[str]) -> dict:
         self.initiated_with.append(scopes)
@@ -22,6 +31,16 @@ class _FakeClient:
     def acquire_token_by_device_flow(self, flow: dict) -> dict:
         self.received_flow.append(flow)
         return self._token_response
+
+    def get_accounts(self) -> list[dict]:
+        return self._accounts
+
+    def acquire_token_silent(
+        self, scopes: list[str], *, account: dict
+    ) -> dict | None:
+        if self._silent_response and account in self._accounts:
+            return self._silent_response
+        return None
 
 
 def test_device_code_service_opens_browser_when_flow_succeeds() -> None:
@@ -97,3 +116,30 @@ def test_device_code_service_builds_fallback_verification_url() -> None:
     assert opened_urls == [
         "https://login.microsoftonline.com/common/oauth2/deviceauth?code=ABCD1234"
     ]
+
+
+def test_device_code_service_uses_silent_cache_when_available() -> None:
+    """A cached account bypasses the device code flow."""
+
+    flow = {"user_code": "ABCD1234"}
+    token = {"access_token": "cached-token", "token_type": "Bearer"}
+    client = _FakeClient(
+        flow,
+        token,
+        accounts=[{"home_account_id": "abc"}],
+        silent_response=token,
+    )
+
+    service = DeviceCodeLoginService(
+        client_id="client-id",
+        authority="https://login.microsoftonline.com/common",
+        scopes=["scope/.default"],
+        client=client,
+        open_browser=False,
+    )
+
+    result = service.acquire_token()
+
+    assert result == token
+    assert client.initiated_with == []
+    assert client.received_flow == []

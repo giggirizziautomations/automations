@@ -56,6 +56,7 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `MSAL_AUTHORITY` | Authority MSAL (tenant o `common`) | `https://login.microsoftonline.com/common` |
 | `MSAL_SCOPES` | Scopes richiesti dal flusso device code (valori separati da virgola) | `https://analysis.windows.net/powerbi/api/.default` |
 | `MSAL_OPEN_BROWSER` | Se `true`, apre automaticamente il browser locale con il codice dispositivo | `true` |
+| `MSAL_TOKEN_CACHE_PATH` | Percorso sul filesystem dove salvare la cache MSAL serializzata | `./data/aad_user_token_cache.json` |
 
 ## Comandi utili
 
@@ -126,8 +127,8 @@ curl -X POST http://localhost:8000/powerbi/device-login
 
 L'endpoint crea automaticamente il device code, apre il browser all'URL `https://login.microsoftonline.com/common/oauth2/deviceauth`
 con il codice precompilato e attende il completamento dell'autenticazione. Al termine restituisce il token MSAL, che può essere
-riutilizzato per chiamare le API di Power BI. Configura le variabili `MSAL_CLIENT_ID` e `MSAL_SCOPES` con i valori forniti dalla
-tua organizzazione Microsoft.
+riutilizzato per chiamare le API di Power BI. Configura le variabili `MSAL_CLIENT_ID`, `MSAL_SCOPES` e, se vuoi persistere i token
+fra esecuzioni, il percorso `MSAL_TOKEN_CACHE_PATH` con i valori forniti dalla tua organizzazione Microsoft.
 
 ## Logging e osservabilità
 

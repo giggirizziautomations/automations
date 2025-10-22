@@ -31,6 +31,7 @@ def get_device_login_service(
         authority=settings.msal_authority,
         scopes=settings.msal_scopes,
         open_browser=settings.msal_open_browser,
+        token_cache_path=settings.msal_token_cache_path,
     )
 
 
