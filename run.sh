@@ -11,6 +11,9 @@ case "$COMMAND" in
   keygen)
     python -m app.cli.keygen "$@"
     ;;
+  jwt-keygen)
+    python -m app.cli.jwt_keygen "$@"
+    ;;
   create-admin)
     python -m app.cli.create_admin "$@"
     ;;
@@ -30,6 +33,7 @@ Usage: $0 <command> [args]
 Commands:
   init-db         Inizializza il database SQLite
   keygen          Genera e salva una chiave Fernet
+  jwt-keygen      Genera e salva un secret JWT
   create-admin    Crea un utente amministratore
   create-client   Crea un client per il grant client_credentials
   server          Avvia il server di sviluppo (uvicorn --reload)
