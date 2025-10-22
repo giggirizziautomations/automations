@@ -6,7 +6,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.auth import Principal, require_admin
+from app.core.auth import Principal, get_current_user, require_admin
 from app.core.security import encrypt_str
 from app.db import models
 from app.db.base import get_db
@@ -93,18 +93,19 @@ async def get_user(
     )
 
 
-@router.patch("/{user_id}", response_model=UserOut)
+@router.patch("", response_model=UserOut)
 async def update_user(
-    user_id: int,
     payload: UserUpdate,
+    user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
-    _: Principal = Depends(require_admin),
 ) -> UserOut:
-    """Update an existing user."""
+    """Update the authenticated user's information."""
 
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    if payload.scopes is not None or payload.is_admin is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to modify administrative fields",
+        )
 
     if payload.email and payload.email != user.email:
         exists = db.query(models.User).filter(models.User.email == payload.email).first()
@@ -118,10 +119,6 @@ async def update_user(
         user.surname = payload.surname
     if payload.password is not None:
         user.password_encrypted = encrypt_str(payload.password)
-    if payload.scopes is not None:
-        user.set_scopes(payload.scopes)
-    if payload.is_admin is not None:
-        user.is_admin = payload.is_admin
 
     db.add(user)
     db.commit()
