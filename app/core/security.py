@@ -8,6 +8,7 @@ from typing import Iterable, List
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException, status
+from jwt import ExpiredSignatureError, InvalidTokenError
 
 from app.core.config import get_settings
 
@@ -94,7 +95,18 @@ def decode_token(token: str) -> dict:
     settings = get_settings()
     if not settings.jwt_secret:
         raise SecurityError("JWT_SECRET environment variable is not configured.")
-    return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+    try:
+        return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+    except ExpiredSignatureError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+        ) from exc
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+        ) from exc
 
 
 __all__ = [
