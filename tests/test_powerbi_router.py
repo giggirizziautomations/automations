@@ -1,6 +1,3 @@
-"""Integration tests for the Power BI device login endpoint."""
-from __future__ import annotations
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -8,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core import security
 from app.core.config import get_settings
 from app.db import models
+from app.services import DeviceCodeLoginError
 
 
 def _create_user(
@@ -61,7 +59,6 @@ def test_device_login_uses_user_specific_configuration(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-
     password = "Password123!"
     user = _create_user(
         db_session,
@@ -70,34 +67,29 @@ def test_device_login_uses_user_specific_configuration(
         tenant_id="12345678-aaaa-bbbb-cccc-1234567890ab",
         public_client_id="11111111-2222-3333-4444-555555555555",
         cache_path="/tmp/msal/cache.json",
+        scopes=["bi-user"],
     )
 
     token = _obtain_token(api_client, email=user.email, password=password)
 
-    captured: dict[str, object] = {}
-    flow_payload = {
-        "user_code": "ABC123",
-        "verification_uri": "https://login.microsoftonline.com/common/oauth2/deviceauth",
-        "verification_uri_complete": "https://login.microsoftonline.com/common/oauth2/deviceauth?code=ABC123",
-        "device_code": "device-code",
-        "message": "Please authenticate",
-        "expires_in": 900,
-        "interval": 5,
-    }
+    captured_service_kwargs: dict[str, object] = {}
+    captured_automation_service: object | None = None
 
     class _DummyService:
         def __init__(self, **kwargs: object) -> None:  # pragma: no cover - simple store
-            captured.update(kwargs)
-
-        def initiate_device_flow(self) -> dict[str, object]:
-            return flow_payload
-
-        def acquire_token_with_flow(self, flow: dict[str, object]) -> dict[str, str]:
-            assert flow is flow_payload
-        def acquire_token(self) -> dict[str, str]:
-            return {"access_token": "dummy-token", "token_type": "Bearer"}
+            captured_service_kwargs.update(kwargs)
 
     monkeypatch.setattr("app.routers.powerbi.DeviceCodeLoginService", _DummyService)
+
+    class _Automation:
+        def __init__(self, *, service: object, **_: object) -> None:
+            nonlocal captured_automation_service
+            captured_automation_service = service
+
+        def authenticate(self) -> dict[str, str]:
+            return {"access_token": "dummy-token", "token_type": "Bearer"}
+
+    monkeypatch.setattr("app.routers.powerbi.PlaywrightDeviceLoginAutomation", _Automation)
 
     response = api_client.post(
         "/powerbi/device-login",
@@ -105,38 +97,20 @@ def test_device_login_uses_user_specific_configuration(
     )
 
     assert response.status_code == 200
-    init_body = response.json()
-    assert init_body["flow_id"]
-    assert init_body["user_code"] == flow_payload["user_code"]
-    assert init_body["verification_uri"] == flow_payload["verification_uri"]
+    assert response.json()["access_token"] == "dummy-token"
+
+    assert captured_service_kwargs["client_id"] == user.aad_public_client_id
     assert (
-        init_body["verification_uri_complete"]
-        == flow_payload["verification_uri_complete"]
-    )
-    assert init_body["message"] == flow_payload["message"]
-    assert init_body["expires_in"] == flow_payload["expires_in"]
-    assert init_body["interval"] == flow_payload["interval"]
-
-    completion = api_client.post(
-        "/powerbi/device-login/complete",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"flow_id": init_body["flow_id"]},
-    )
-
-    assert completion.status_code == 200
-    body = completion.json()
-    assert body["access_token"] == "dummy-token"
-
-    assert captured["client_id"] == user.aad_public_client_id
-    assert (
-        captured["authority"]
+        captured_service_kwargs["authority"]
         == "https://login.microsoftonline.com/12345678-aaaa-bbbb-cccc-1234567890ab"
     )
-    assert captured["token_cache_path"] == user.aad_token_cache_path
+    assert captured_service_kwargs["token_cache_path"] == user.aad_token_cache_path
 
     settings = get_settings()
-    assert captured["scopes"] == settings.msal_scopes
-    assert captured["open_browser"] == settings.msal_open_browser
+    assert captured_service_kwargs["scopes"] == settings.msal_scopes
+    assert captured_service_kwargs["open_browser"] is False
+
+    assert isinstance(captured_automation_service, _DummyService)
 
 
 def test_device_login_requires_tenant_configuration(
@@ -149,6 +123,7 @@ def test_device_login_requires_tenant_configuration(
         email="tenantless@example.com",
         password=password,
         tenant_id=None,
+        scopes=["bi-user"],
     )
 
     token = _obtain_token(api_client, email=user.email, password=password)
@@ -163,21 +138,12 @@ def test_device_login_requires_tenant_configuration(
 
 
 def test_device_login_requires_authentication(api_client: TestClient) -> None:
-    response_init = api_client.post("/powerbi/device-login")
-
-    assert response_init.status_code == 401
-
-    response_complete = api_client.post(
-        "/powerbi/device-login/complete", json={"flow_id": "dummy"}
-    )
-
-    assert response_complete.status_code == 401
     response = api_client.post("/powerbi/device-login")
 
     assert response.status_code == 401
 
 
-def test_playwright_device_login_requires_scope(
+def test_device_login_requires_scope(
     api_client: TestClient,
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -194,15 +160,13 @@ def test_playwright_device_login_requires_scope(
     token = _obtain_token(api_client, email=user.email, password=password)
 
     class _Automation:
-        def __init__(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - not executed
+        def __init__(self, *args: object, **kwargs: object) -> None:  # pragma: no cover
             raise AssertionError("Automation should not be instantiated without scope")
 
-    monkeypatch.setattr(
-        "app.routers.powerbi.PlaywrightDeviceLoginAutomation", _Automation
-    )
+    monkeypatch.setattr("app.routers.powerbi.PlaywrightDeviceLoginAutomation", _Automation)
 
     response = api_client.post(
-        "/powerbi/device-login/playwright",
+        "/powerbi/device-login",
         headers={"Authorization": f"Bearer {token}"},
     )
 
@@ -210,57 +174,7 @@ def test_playwright_device_login_requires_scope(
     assert "Missing required scopes" in response.json()["detail"]
 
 
-def test_playwright_device_login_allows_bi_user(
-    api_client: TestClient,
-    db_session: Session,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    password = "Password123!"
-    user = _create_user(
-        db_session,
-        email="biuser@example.com",
-        password=password,
-        tenant_id="12345678-aaaa-bbbb-cccc-1234567890ab",
-        scopes=["bi-user"],
-    )
-
-    token = _obtain_token(api_client, email=user.email, password=password)
-
-    captured: dict[str, object] = {}
-    captured_service_config: dict[str, object] = {}
-
-    class _DummyService:
-        def __init__(self, **kwargs: object) -> None:  # pragma: no cover - simple stub
-            captured_service_config.update(kwargs)
-            self._open_browser = kwargs.get("open_browser")
-
-    monkeypatch.setattr("app.routers.powerbi.DeviceCodeLoginService", _DummyService)
-
-    class _Automation:
-        def __init__(self, *, service: object, **_: object) -> None:
-            captured["service"] = service
-
-        def authenticate(self) -> dict[str, str]:
-            return {"access_token": "dummy", "token_type": "Bearer"}
-
-    monkeypatch.setattr(
-        "app.routers.powerbi.PlaywrightDeviceLoginAutomation", _Automation
-    )
-
-    response = api_client.post(
-        "/powerbi/device-login/playwright",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["access_token"] == "dummy"
-
-    service = captured["service"]
-    assert isinstance(service, _DummyService)
-    assert captured_service_config["open_browser"] is False
-
-
-def test_playwright_device_login_allows_admin(
+def test_device_login_allows_admin(
     api_client: TestClient,
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -277,12 +191,11 @@ def test_playwright_device_login_allows_admin(
 
     token = _obtain_token(api_client, email=user.email, password=password)
 
-    captured_service_config: dict[str, object] = {}
+    captured_service_kwargs: dict[str, object] = {}
 
     class _DummyService:
-        def __init__(self, **kwargs: object) -> None:  # pragma: no cover - simple stub
-            captured_service_config.update(kwargs)
-            self._open_browser = kwargs.get("open_browser")
+        def __init__(self, **kwargs: object) -> None:  # pragma: no cover - simple store
+            captured_service_kwargs.update(kwargs)
 
     monkeypatch.setattr("app.routers.powerbi.DeviceCodeLoginService", _DummyService)
 
@@ -293,15 +206,53 @@ def test_playwright_device_login_allows_admin(
         def authenticate(self) -> dict[str, str]:
             return {"access_token": "admin-token", "token_type": "Bearer"}
 
-    monkeypatch.setattr(
-        "app.routers.powerbi.PlaywrightDeviceLoginAutomation", _Automation
-    )
+    monkeypatch.setattr("app.routers.powerbi.PlaywrightDeviceLoginAutomation", _Automation)
 
     response = api_client.post(
-        "/powerbi/device-login/playwright",
+        "/powerbi/device-login",
         headers={"Authorization": f"Bearer {token}"},
     )
 
     assert response.status_code == 200
     assert response.json()["access_token"] == "admin-token"
-    assert captured_service_config["open_browser"] is False
+    assert captured_service_kwargs["open_browser"] is False
+
+
+def test_device_login_propagates_errors(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    password = "Password123!"
+    user = _create_user(
+        db_session,
+        email="error@example.com",
+        password=password,
+        tenant_id="12345678-aaaa-bbbb-cccc-1234567890ab",
+        scopes=["bi-user"],
+    )
+
+    token = _obtain_token(api_client, email=user.email, password=password)
+
+    class _DummyService:
+        def __init__(self, **_: object) -> None:  # pragma: no cover - simple stub
+            pass
+
+    monkeypatch.setattr("app.routers.powerbi.DeviceCodeLoginService", _DummyService)
+
+    class _Automation:
+        def __init__(self, *, service: object, **_: object) -> None:
+            self._service = service
+
+        def authenticate(self) -> dict[str, str]:
+            raise DeviceCodeLoginError("boom")
+
+    monkeypatch.setattr("app.routers.powerbi.PlaywrightDeviceLoginAutomation", _Automation)
+
+    response = api_client.post(
+        "/powerbi/device-login",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "boom"

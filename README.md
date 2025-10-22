@@ -20,12 +20,9 @@ Stack FastAPI pronto per ambienti di produzione, progettato per crescere in ecos
 7. Crea un amministratore: `python -m app.cli.create_admin Nome Cognome email@example.com --password ****`.
 8. Crea un client credenziali: `python -m app.cli.create_client "Reporting" --client-id reporting-service --scope reports:read`.
    - In alternativa puoi passare il `client_id` come secondo argomento posizionale: `python -m app.cli.create_client "Reporting" reporting-service`.
-9. Esegui un login MSAL di prova usando gli endpoint `/powerbi/device-login` e `/powerbi/device-login/complete` con un token utente oppure, in alternativa, dal terminale con `./run.sh aad-login`.
-   - L'endpoint di avvio restituisce il codice dispositivo e le istruzioni fornite da Microsoft Entra; quello di completamento conclude il flusso e restituisce il token MSAL.
+9. Esegui un login MSAL di prova usando l'endpoint `/powerbi/device-login` con un token utente oppure, in alternativa, dal terminale con `./run.sh aad-login`.
+   - L'endpoint e il comando CLI avviano automaticamente un browser Playwright che guida l'intero flusso MSAL (dal codice dispositivo alla cattura del token).
    - Entrambi riutilizzano il `PUBLIC_CLIENT_ID` configurato sul profilo dell'utente autenticato e l'`aad_tenant_id` salvato sul database.
-9. Esegui un login MSAL di prova usando l'endpoint `/powerbi/device-login` con un token utente o, in alternativa, dal terminale con `./run.sh aad-login`.
-   - L'endpoint riutilizza il `PUBLIC_CLIENT_ID` configurato sul profilo dell'utente autenticato e l'`aad_tenant_id` salvato sul database.
-   - Il comando CLI continua a funzionare per scenari manuali o offline e salva i token nella cache configurata.
 10. Avvia il server di sviluppo: `uvicorn app.main:app --reload` oppure `./run.sh server`.
 
 ### Sequenza comandi da tastiera
@@ -83,7 +80,7 @@ alle API di creazione.
 | `./run.sh create-admin ...` | Crea un utente amministratore |
 | `./run.sh create-client --client-id <id> --scope ...` | Crea un'applicazione client credential |
 | `./run.sh create-client <id> --scope ...` | Variante con `client_id` posizionale |
-| `./run.sh aad-login` | Avvia il device code flow MSAL usando il `PUBLIC_CLIENT_ID` |
+| `./run.sh aad-login` | Avvia il device code flow MSAL aprendo un browser Playwright |
 | `./run.sh server` | Avvia Uvicorn in modalità reload |
 | `./run.sh test` | Esegue la suite di test con Pytest |
 
@@ -129,54 +126,49 @@ curl -X POST \
 - `GET /users` richiede token admin.
 - `GET /reports` richiede lo scope `reports:read`.
 - `GET /me` restituisce il profilo corrente.
-- `POST /powerbi/device-login` avvia il flusso device code MSAL e restituisce il codice dispositivo.
-- `POST /powerbi/device-login/complete` conclude il flusso device code MSAL e restituisce il token ottenuto.
+- `POST /powerbi/device-login` esegue l'intero flusso device code MSAL aprendo un browser Playwright e restituisce il token ottenuto.
 
 Utilizza l'header `Authorization: Bearer <token>` nelle richieste.
 
 ## Integrazione Power BI
 
-Per ottenere un token tramite device code flow MSAL (con supporto MFA):
+Il flusso di autenticazione verso Microsoft Entra (device code + cattura token) è stato unificato in un'unica operazione che apre
+un browser Playwright e attende il completamento dell'accesso. Puoi eseguirlo sia via API sia da CLI.
+
+Gli utenti devono avere un `aad_tenant_id` configurato (deriva da `TENANT_ID` di default) e un `aad_public_client_id` valido. Se vuoi
+riutilizzare i token fra sessioni, configura `aad_token_cache_path` o il default `TOKEN_CACHE_PATH`.
+
+### Via API
 
 ```bash
-# 1) Avvio del flusso: ottieni il codice dispositivo
 curl -X POST \
-  -H "Authorization: Bearer <JWT utente>" \
+  -H "Authorization: Bearer <JWT utente con scope bi-user>" \
   http://localhost:8000/powerbi/device-login
+```
 
-# Risposta (estratto)
+La chiamata rimane in attesa mentre il server apre una finestra di browser controllata da Playwright e guida l'utente attraverso il
+portale Microsoft (con supporto MFA). Al termine della procedura l'endpoint restituisce direttamente il payload MSAL, ad esempio:
+
+```json
 {
-  "flow_id": "<identificativo>",
-  "user_code": "CODE-123",
-  "verification_uri": "https://microsoft.com/devicelogin",
-  "message": "Per completare l'accesso visita ..."
+  "token_type": "Bearer",
+  "expires_in": 3599,
+  "access_token": "<token>",
+  "refresh_token": "<refresh>",
+  "scope": "https://analysis.windows.net/powerbi/api/.default"
 }
-
-# 2) Completa l'autenticazione da browser seguendo le istruzioni restituite (supporta MFA)
-
-# 3) Recupera il token MSAL una volta completato l'accesso
-curl -X POST \
-  -H "Authorization: Bearer <JWT utente>" \
-  -H "Content-Type: application/json" \
-  -d '{"flow_id":"<identificativo>"}' \
-  http://localhost:8000/powerbi/device-login/complete
 ```
 
-Gli endpoint recuperano il tenant (`aad_tenant_id`) e il client MSAL (`aad_public_client_id`) dal profilo dell'utente associato al token
-e mantengono lo stato del flusso fino alla scadenza. Assicurati che gli utenti abbiano un `aad_tenant_id` valorizzato (viene popolato
-automaticamente usando `TENANT_ID` durante la creazione) e, se vuoi persistere i token fra esecuzioni, configura `aad_token_cache_path`
-o il relativo default in `TOKEN_CACHE_PATH`. In alternativa agli endpoint HTTP puoi avviare il flusso direttamente da terminale con
-curl -X POST \
-  -H "Authorization: Bearer <JWT utente>" \
-  http://localhost:8000/powerbi/device-login
+### Via CLI (test end-to-end)
+
+Per validare rapidamente il flusso completo dal terminale:
+
+```bash
+./run.sh aad-login
 ```
 
-L'endpoint recupera il tenant (`aad_tenant_id`) e il client MSAL (`aad_public_client_id`) dal profilo dell'utente associato al token
-e avvia il device code flow aprendo il browser con il codice precompilato. Al termine restituisce il token MSAL, che può essere
-riutilizzato per chiamare le API di Power BI. Assicurati che gli utenti abbiano un `aad_tenant_id` valorizzato (viene popolato
-automaticamente usando `TENANT_ID` durante la creazione) e, se vuoi persistere i token fra esecuzioni, configura `aad_token_cache_path`
-o il relativo default in `TOKEN_CACHE_PATH`. In alternativa all'endpoint HTTP puoi avviare il flusso direttamente da terminale con
-`./run.sh aad-login`.
+Il comando utilizza le stesse impostazioni dell'API, apre un browser Playwright locale e stampa a schermo un'anteprima del token MSAL
+oltre al percorso della cache configurata.
 
 ## Logging e osservabilità
 

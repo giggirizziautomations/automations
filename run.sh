@@ -21,9 +21,6 @@ case "$COMMAND" in
     python -m app.cli.create_client "$@"
     ;;
   aad-login)
-    python -m app.cli.msal_device_login "$@"
-    ;;
-  aad-login-playwright)
     python -m app.cli.msal_device_playwright "$@"
     ;;
   server)
@@ -42,9 +39,7 @@ Commands:
   jwt-keygen      Genera e salva un secret JWT
   create-admin    Crea un utente amministratore
   create-client   Crea un client per il grant client_credentials
-  aad-login       Avvia il device code flow MSAL dal terminale
-  aad-login-playwright
-                  Avvia il device code flow MSAL aprendo il browser con Playwright
+  aad-login       Avvia il device code flow MSAL aprendo il browser con Playwright
   server          Avvia il server di sviluppo (uvicorn --reload)
   test            Esegue la suite di test (pytest)
 USAGE
