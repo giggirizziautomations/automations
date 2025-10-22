@@ -20,7 +20,10 @@ Stack FastAPI pronto per ambienti di produzione, progettato per crescere in ecos
 7. Crea un amministratore: `python -m app.cli.create_admin Nome Cognome email@example.com --password ****`.
 8. Crea un client credenziali: `python -m app.cli.create_client "Reporting" --client-id reporting-service --scope reports:read`.
    - In alternativa puoi passare il `client_id` come secondo argomento posizionale: `python -m app.cli.create_client "Reporting" reporting-service`.
-9. Avvia il server di sviluppo: `uvicorn app.main:app --reload` oppure `./run.sh server`.
+9. Esegui un login MSAL di prova usando l'endpoint `/powerbi/device-login` con un token utente o, in alternativa, dal terminale con `./run.sh aad-login`.
+   - L'endpoint riutilizza il `PUBLIC_CLIENT_ID` configurato sul profilo dell'utente autenticato e l'`aad_tenant_id` salvato sul database.
+   - Il comando CLI continua a funzionare per scenari manuali o offline e salva i token nella cache configurata.
+10. Avvia il server di sviluppo: `uvicorn app.main:app --reload` oppure `./run.sh server`.
 
 ### Sequenza comandi da tastiera
 
@@ -36,6 +39,7 @@ python -m app.cli.keygen
 python -m app.cli.jwt_keygen
 python -m app.cli.create_admin "Nome" "Cognome" admin@example.com --password "Password123" --scopes "*"
 python -m app.cli.create_client "Reporting" --client-id reporting-service --scope "reports:read"
+./run.sh aad-login
 uvicorn app.main:app --reload
 ```
 
@@ -52,11 +56,19 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `JWT_SECRET` | Secret per firmare i JWT HS256 | _obbligatorio_ |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Durata access token in minuti | `15` |
 | `LOG_LEVEL` | Livello di log dell'applicazione | `INFO` |
-| `MSAL_CLIENT_ID` | Client ID registrato su Microsoft Entra ID per il device code flow | _obbligatorio_ |
-| `MSAL_AUTHORITY` | Authority MSAL (tenant o `common`) | `https://login.microsoftonline.com/common` |
-| `MSAL_SCOPES` | Scopes richiesti dal flusso device code (valori separati da virgola) | `https://analysis.windows.net/powerbi/api/.default` |
+| `TENANT_ID` | GUID del tenant Microsoft Entra ID usato come default per i nuovi utenti | _obbligatorio per popolare i profili_ |
+| `PUBLIC_CLIENT_ID` | Client ID pubblico multi-tenant fornito da Microsoft per il device code flow | `04f0c124-f2bc-4f59-9a70-39b0f486b5ab` |
+| `SCOPES` | Elenco di scope MSAL separati da spazio (es. Dataverse + OpenID) | `https://yourorg.crm.dynamics.com/user_impersonation offline_access openid profile` |
 | `MSAL_OPEN_BROWSER` | Se `true`, apre automaticamente il browser locale con il codice dispositivo | `true` |
-| `MSAL_TOKEN_CACHE_PATH` | Percorso sul filesystem dove salvare la cache MSAL serializzata | `./data/aad_user_token_cache.json` |
+| `TOKEN_CACHE_PATH` | Percorso sul filesystem dove salvare la cache MSAL serializzata | `./data/aad_user_token_cache.json` |
+
+Le variabili storiche `MSAL_CLIENT_ID`, `MSAL_AUTHORITY`, `MSAL_SCOPES` e `MSAL_TOKEN_CACHE_PATH` sono ancora supportate come fallback per
+retrocompatibilità e verranno sovrascritte automaticamente dai nuovi valori quando presenti.
+
+Ogni nuovo utente creato tramite CLI o API eredita automaticamente questi parametri MSAL.
+I campi `aad_tenant_id`, `aad_public_client_id` e `aad_token_cache_path` vengono salvati sul record
+utente per facilitare audit e troubleshooting, e possono essere sovrascritti passando valori espliciti
+alle API di creazione.
 
 ## Comandi utili
 
@@ -68,6 +80,7 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `./run.sh create-admin ...` | Crea un utente amministratore |
 | `./run.sh create-client --client-id <id> --scope ...` | Crea un'applicazione client credential |
 | `./run.sh create-client <id> --scope ...` | Variante con `client_id` posizionale |
+| `./run.sh aad-login` | Avvia il device code flow MSAL usando il `PUBLIC_CLIENT_ID` |
 | `./run.sh server` | Avvia Uvicorn in modalità reload |
 | `./run.sh test` | Esegue la suite di test con Pytest |
 
@@ -122,13 +135,17 @@ Utilizza l'header `Authorization: Bearer <token>` nelle richieste.
 Per ottenere un token tramite device code flow MSAL (con supporto MFA):
 
 ```bash
-curl -X POST http://localhost:8000/powerbi/device-login
+curl -X POST \
+  -H "Authorization: Bearer <JWT utente>" \
+  http://localhost:8000/powerbi/device-login
 ```
 
-L'endpoint crea automaticamente il device code, apre il browser all'URL `https://login.microsoftonline.com/common/oauth2/deviceauth`
-con il codice precompilato e attende il completamento dell'autenticazione. Al termine restituisce il token MSAL, che può essere
-riutilizzato per chiamare le API di Power BI. Configura le variabili `MSAL_CLIENT_ID`, `MSAL_SCOPES` e, se vuoi persistere i token
-fra esecuzioni, il percorso `MSAL_TOKEN_CACHE_PATH` con i valori forniti dalla tua organizzazione Microsoft.
+L'endpoint recupera il tenant (`aad_tenant_id`) e il client MSAL (`aad_public_client_id`) dal profilo dell'utente associato al token
+e avvia il device code flow aprendo il browser con il codice precompilato. Al termine restituisce il token MSAL, che può essere
+riutilizzato per chiamare le API di Power BI. Assicurati che gli utenti abbiano un `aad_tenant_id` valorizzato (viene popolato
+automaticamente usando `TENANT_ID` durante la creazione) e, se vuoi persistere i token fra esecuzioni, configura `aad_token_cache_path`
+o il relativo default in `TOKEN_CACHE_PATH`. In alternativa all'endpoint HTTP puoi avviare il flusso direttamente da terminale con
+`./run.sh aad-login`.
 
 ## Logging e osservabilità
 

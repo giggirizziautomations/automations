@@ -21,6 +21,9 @@ class User(Base):
     password_encrypted = Column(Text, nullable=False)
     scopes = Column(Text, nullable=False, default="")
     is_admin = Column(Boolean, default=False, nullable=False)
+    aad_tenant_id = Column(String(255), nullable=True)
+    aad_public_client_id = Column(String(255), nullable=True)
+    aad_token_cache_path = Column(String(512), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

@@ -143,3 +143,54 @@ def test_device_code_service_uses_silent_cache_when_available() -> None:
     assert result == token
     assert client.initiated_with == []
     assert client.received_flow == []
+
+
+def test_device_code_service_exposes_silent_method() -> None:
+    """The explicit silent helper returns cached tokens when available."""
+
+    token = {"access_token": "cached-token", "token_type": "Bearer"}
+    client = _FakeClient(
+        {"user_code": "ABCD1234"},
+        token,
+        accounts=[{"home_account_id": "abc"}],
+        silent_response=token,
+    )
+
+    service = DeviceCodeLoginService(
+        client_id="client-id",
+        authority="https://login.microsoftonline.com/common",
+        scopes=["scope/.default"],
+        client=client,
+        open_browser=False,
+    )
+
+    result = service.acquire_token_silent()
+
+    assert result == token
+    assert client.initiated_with == []
+    assert client.received_flow == []
+
+
+def test_device_code_service_device_flow_method_runs_interactively() -> None:
+    """The explicit device flow helper skips the silent cache."""
+
+    flow = {
+        "user_code": "ABCD1234",
+        "verification_uri_complete": "https://login.microsoftonline.com/complete",
+    }
+    token = {"access_token": "token", "token_type": "Bearer"}
+    client = _FakeClient(flow, token)
+
+    service = DeviceCodeLoginService(
+        client_id="client-id",
+        authority="https://login.microsoftonline.com/common",
+        scopes=["scope/.default"],
+        client=client,
+        open_browser=False,
+    )
+
+    result = service.acquire_token_device_flow()
+
+    assert result == token
+    assert client.initiated_with == [["scope/.default"]]
+    assert client.received_flow == [flow]
