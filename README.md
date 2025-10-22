@@ -52,6 +52,10 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `JWT_SECRET` | Secret per firmare i JWT HS256 | _obbligatorio_ |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Durata access token in minuti | `15` |
 | `LOG_LEVEL` | Livello di log dell'applicazione | `INFO` |
+| `MSAL_CLIENT_ID` | Client ID registrato su Microsoft Entra ID per il device code flow | _obbligatorio_ |
+| `MSAL_AUTHORITY` | Authority MSAL (tenant o `common`) | `https://login.microsoftonline.com/common` |
+| `MSAL_SCOPES` | Scopes richiesti dal flusso device code (valori separati da virgola) | `https://analysis.windows.net/powerbi/api/.default` |
+| `MSAL_OPEN_BROWSER` | Se `true`, apre automaticamente il browser locale con il codice dispositivo | `true` |
 
 ## Comandi utili
 
@@ -108,8 +112,22 @@ curl -X POST \
 - `GET /users` richiede token admin.
 - `GET /reports` richiede lo scope `reports:read`.
 - `GET /me` restituisce il profilo corrente.
+- `POST /powerbi/device-login` avvia il flusso device code MSAL e restituisce il token ottenuto.
 
 Utilizza l'header `Authorization: Bearer <token>` nelle richieste.
+
+## Integrazione Power BI
+
+Per ottenere un token tramite device code flow MSAL (con supporto MFA):
+
+```bash
+curl -X POST http://localhost:8000/powerbi/device-login
+```
+
+L'endpoint crea automaticamente il device code, apre il browser all'URL `https://login.microsoftonline.com/common/oauth2/deviceauth`
+con il codice precompilato e attende il completamento dell'autenticazione. Al termine restituisce il token MSAL, che può essere
+riutilizzato per chiamare le API di Power BI. Configura le variabili `MSAL_CLIENT_ID` e `MSAL_SCOPES` con i valori forniti dalla
+tua organizzazione Microsoft.
 
 ## Logging e osservabilità
 
