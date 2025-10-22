@@ -7,14 +7,20 @@ import secrets
 import typer
 
 
-DEFAULT_SECRET_FILE = Path(".jwt.secret")
+from .utils import upsert_env_value
+
+
+DEFAULT_ENV_FILE = Path(".env")
 DEFAULT_NBYTES = 32
 
 
 def generate(
-    output: Path = typer.Option(
-        DEFAULT_SECRET_FILE,
-        help="File di output per il secret JWT",
+    env_file: Path = typer.Option(
+        DEFAULT_ENV_FILE,
+        exists=False,
+        dir_okay=False,
+        writable=True,
+        help="File .env da aggiornare con il secret JWT",
     ),
     nbytes: int = typer.Option(
         DEFAULT_NBYTES,
@@ -26,9 +32,10 @@ def generate(
     """Generate a random JWT secret and store it on disk."""
 
     secret = secrets.token_urlsafe(nbytes)
-    output.write_text(secret)
-    typer.echo(f"Secret JWT generato e salvato in {output}.")
-    typer.echo("Imposta l'ambiente con: export JWT_SECRET='" + secret + "'")
+    upsert_env_value(env_file, "JWT_SECRET", secret)
+    typer.echo(
+        f"Secret JWT generato e salvato in {env_file} (variabile JWT_SECRET).",
+    )
 
 
 if __name__ == "__main__":
