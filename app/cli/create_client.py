@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
-from typing import List
+from typing import List, Optional
 
 import typer
 from sqlalchemy.orm import Session
@@ -33,14 +33,31 @@ def _store_client(name: str, scopes: List[str]) -> tuple[str, str]:
 
 
 def create(
-    name: str = typer.Argument(..., help="Nome dell'applicazione client"),
-    scope: List[str] = typer.Option(
-        [], "--scope", help="Scope da assegnare", show_default=False
+    name: Optional[str] = typer.Argument(
+        None, help="Nome dell'applicazione client"
+    ),
+    scope: Optional[List[str]] = typer.Option(
+        None, "--scope", help="Scope da assegnare", show_default=False
     ),
 ) -> None:
     """Create a new client credentials application."""
 
-    client_id, client_secret = _store_client(name, scope)
+    normalized_name = (name or "").strip()
+    if not normalized_name:
+        typer.secho(
+            "Errore: il nome dell'applicazione client non può essere vuoto.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        typer.secho(
+            "Esempio: python -m app.cli.create_client my-app --scope reports:read",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    client_scopes = scope or []
+
+    client_id, client_secret = _store_client(normalized_name, client_scopes)
     typer.echo("Client creato con successo!")
     typer.echo(f"client_id: {client_id}")
     typer.echo(f"client_secret: {client_secret}")
