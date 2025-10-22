@@ -1,9 +1,9 @@
 """CLI utility to create administrator users."""
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional, Sequence
 
-import typer
+import click
 from sqlalchemy.orm import Session
 
 from app.core.security import encrypt_str
@@ -24,7 +24,7 @@ def _create_admin(
     try:
         existing = session.query(models.User).filter(models.User.email == email).first()
         if existing:
-            raise typer.BadParameter("User with this email already exists")
+            raise click.BadParameter("User with this email already exists")
         user = models.User(
             name=name,
             surname=surname,
@@ -41,28 +41,76 @@ def _create_admin(
         session.close()
 
 
+def _prompt_password() -> str:
+    """Prompt the user for a password and confirmation."""
+
+    while True:
+        password = click.prompt("Password", hide_input=True)
+        confirmation = click.prompt("Conferma password", hide_input=True)
+        if password == confirmation:
+            return password
+        click.echo("Le password non coincidono, riprova.", err=True)
+
+
+def _merge_scopes(option_scopes: Optional[Sequence[str]], argument_scopes: Sequence[str]) -> List[str]:
+    scopes: List[str] = []
+    if option_scopes:
+        scopes.extend(option_scopes)
+    scopes.extend(argument_scopes)
+    if not scopes:
+        scopes = ["*"]
+    return scopes
+
+
+@click.command()
+@click.argument("name")
+@click.argument("surname")
+@click.argument("email")
+@click.argument("password_argument", required=False)
+@click.argument("scope_arguments", nargs=-1)
+@click.option(
+    "--password",
+    "password_option",
+    help="Password per l'amministratore (può essere fornita anche come argomento posizionale)",
+)
+@click.option(
+    "--scope",
+    "scope_option",
+    multiple=True,
+    help="Scope da assegnare. Può essere specificato più volte o fornito come argomento posizionale.",
+)
 def create(
-    name: str = typer.Argument(..., help="Nome"),
-    surname: str = typer.Argument(..., help="Cognome"),
-    email: str = typer.Argument(..., help="Email"),
-    password: str = typer.Option(
-        ..., "--password", prompt=True, confirmation_prompt=True, hide_input=True
-    ),
-    scope: List[str] = typer.Option(
-        ["*"], "--scope", "--scopes", help="Scope da assegnare"
-    ),
+    name: str,
+    surname: str,
+    email: str,
+    password_argument: Optional[str],
+    scope_arguments: Sequence[str],
+    password_option: Optional[str],
+    scope_option: Sequence[str],
 ) -> None:
     """Create a new administrator user."""
+
+    if password_option and password_argument:
+        raise click.BadParameter(
+            "La password non può essere specificata sia come argomento posizionale sia con --password.",
+            param_hint="password",
+        )
+
+    password = password_option or password_argument
+    if password is None:
+        password = _prompt_password()
+
+    scopes = _merge_scopes(scope_option, scope_arguments)
 
     user = _create_admin(
         name=name,
         surname=surname,
         email=email,
         password=password,
-        scopes=scope,
+        scopes=scopes,
     )
-    typer.echo(f"Amministratore creato con id={user.id} ed email={user.email}")
+    click.echo(f"Amministratore creato con id={user.id} ed email={user.email}")
 
 
 if __name__ == "__main__":
-    typer.run(create)
+    create()
