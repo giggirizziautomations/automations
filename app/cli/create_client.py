@@ -1,6 +1,7 @@
 """CLI utility for creating client credential entries."""
 from __future__ import annotations
 
+from typing import Optional, Sequence
 from typing import Sequence
 
 import click
@@ -10,6 +11,14 @@ from app.setup.client_credentials import create_client_application
 
 @click.command()
 @click.argument("name")
+@click.argument("client_id_argument", required=False)
+@click.option(
+    "client_id_option",
+    "--client-id",
+    "-c",
+    help="Identificativo client scelto dall'amministratore",
+    show_default=False,
+)
 @click.argument("client_id")
 @click.option(
     "scopes",
@@ -19,6 +28,12 @@ from app.setup.client_credentials import create_client_application
     help="Scope da assegnare (opzione ripetibile)",
     show_default=False,
 )
+def create(
+    name: str,
+    client_id_argument: Optional[str],
+    client_id_option: Optional[str],
+    scopes: Sequence[str],
+) -> None:
 def create(name: str, client_id: str, scopes: Sequence[str]) -> None:
     """Create a new client credentials application."""
 
@@ -31,6 +46,18 @@ def create(name: str, client_id: str, scopes: Sequence[str]) -> None:
         )
         raise click.Abort()
 
+    normalized_option = (client_id_option or "").strip()
+    normalized_argument = (client_id_argument or "").strip()
+
+    if normalized_option and normalized_argument and normalized_option != normalized_argument:
+        click.secho(
+            "Errore: specifica un unico valore per il client_id (usa --client-id oppure l'argomento posizionale).",
+            err=True,
+            fg="red",
+        )
+        raise click.Abort()
+
+    normalized_client_id = normalized_option or normalized_argument
     normalized_client_id = client_id.strip()
     if not normalized_client_id:
         click.secho(
@@ -39,6 +66,7 @@ def create(name: str, client_id: str, scopes: Sequence[str]) -> None:
             fg="red",
         )
         click.secho(
+            "Esempio: python -m app.cli.create_client my-app --client-id my-client-id --scope reports:read",
             "Esempio: python -m app.cli.create_client my-app my-client-id --scope reports:read",
             err=True,
             fg="red",
