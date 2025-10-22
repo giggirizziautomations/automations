@@ -21,6 +21,14 @@ class Settings(BaseModel):
     jwt_secret: Optional[str] = None
     access_token_expire_minutes: int = Field(default=15, ge=1)
     log_level: str = Field(default="INFO")
+    msal_client_id: Optional[str] = None
+    msal_authority: str = Field(
+        default="https://login.microsoftonline.com/common"
+    )
+    msal_scopes: tuple[str, ...] = Field(
+        default=("https://analysis.windows.net/powerbi/api/.default",)
+    )
+    msal_open_browser: bool = Field(default=True)
 
     class Config:
         frozen = True
@@ -38,7 +46,35 @@ def _build_settings() -> Settings:
             os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
         ),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        msal_client_id=os.getenv("MSAL_CLIENT_ID"),
+        msal_authority=os.getenv(
+            "MSAL_AUTHORITY", "https://login.microsoftonline.com/common"
+        ),
+        msal_scopes=_parse_csv(
+            os.getenv(
+                "MSAL_SCOPES",
+                "https://analysis.windows.net/powerbi/api/.default",
+            )
+        ),
+        msal_open_browser=_parse_bool(os.getenv("MSAL_OPEN_BROWSER", "true")),
     )
+
+
+def _parse_csv(raw_value: str | None) -> tuple[str, ...]:
+    """Parse a comma-separated string into a tuple of scopes."""
+
+    if not raw_value:
+        return tuple()
+    scopes = [scope.strip() for scope in raw_value.split(",") if scope.strip()]
+    return tuple(scopes)
+
+
+def _parse_bool(raw_value: str | None) -> bool:
+    """Convert a string environment flag into a boolean."""
+
+    if raw_value is None:
+        return False
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @lru_cache(maxsize=1)
