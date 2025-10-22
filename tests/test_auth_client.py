@@ -19,10 +19,9 @@ def test_client_credentials_login(api_client: TestClient, db_session: Session) -
     db_session.add(client)
     db_session.commit()
 
-    response = api_client.post(
+    response = api_client.get(
         "/auth/token",
-        data={
-            "grant_type": "client_credentials",
+        params={
             "client_id": "client-123",
             "client_secret": client_secret,
         },
