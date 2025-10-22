@@ -29,6 +29,9 @@ class Settings(BaseModel):
         default=("https://analysis.windows.net/powerbi/api/.default",)
     )
     msal_open_browser: bool = Field(default=True)
+    msal_token_cache_path: Optional[str] = Field(
+        default="./data/aad_user_token_cache.json"
+    )
 
     class Config:
         frozen = True
@@ -57,6 +60,9 @@ def _build_settings() -> Settings:
             )
         ),
         msal_open_browser=_parse_bool(os.getenv("MSAL_OPEN_BROWSER", "true")),
+        msal_token_cache_path=os.getenv(
+            "MSAL_TOKEN_CACHE_PATH", "./data/aad_user_token_cache.json"
+        ),
     )
 
 
