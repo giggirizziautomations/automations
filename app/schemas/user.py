@@ -16,6 +16,9 @@ class UserCreate(UserBase):
     password: str = Field(..., min_length=6)
     scopes: Optional[list[str]] = Field(default=None)
     is_admin: bool = Field(default=False)
+    aad_tenant_id: Optional[str] = Field(default=None, max_length=255)
+    aad_public_client_id: Optional[str] = Field(default=None, max_length=255)
+    aad_token_cache_path: Optional[str] = Field(default=None, max_length=512)
 
 
 class UserUpdate(BaseModel):
@@ -34,6 +37,9 @@ class UserOut(BaseModel):
     email: EmailStr
     scopes: list[str]
     is_admin: bool
+    aad_tenant_id: Optional[str] = None
+    aad_public_client_id: Optional[str] = None
+    aad_token_cache_path: Optional[str] = None
 
     model_config = {
         "from_attributes": True,

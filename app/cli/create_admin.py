@@ -6,6 +6,7 @@ from typing import List, Optional, Sequence
 import click
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.security import encrypt_str
 from app.db import models
 from app.db.base import get_sessionmaker
@@ -25,12 +26,16 @@ def _create_admin(
         existing = session.query(models.User).filter(models.User.email == email).first()
         if existing:
             raise click.BadParameter("User with this email already exists")
+        settings = get_settings()
         user = models.User(
             name=name,
             surname=surname,
             email=email,
             password_encrypted=encrypt_str(password),
             is_admin=True,
+            aad_tenant_id=settings.aad_tenant_id,
+            aad_public_client_id=settings.msal_client_id,
+            aad_token_cache_path=settings.msal_token_cache_path,
         )
         user.set_scopes(scopes or ["*"])
         session.add(user)

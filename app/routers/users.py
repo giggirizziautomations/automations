@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import Principal, get_current_user, require_admin
+from app.core.config import get_settings
 from app.core.security import encrypt_str
 from app.db import models
 from app.db.base import get_db
@@ -28,12 +29,20 @@ async def create_user(
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    settings = get_settings()
     user = models.User(
         name=payload.name,
         surname=payload.surname,
         email=payload.email,
         password_encrypted=encrypt_str(payload.password),
         is_admin=payload.is_admin,
+        aad_tenant_id=payload.aad_tenant_id or settings.aad_tenant_id,
+        aad_public_client_id=(
+            payload.aad_public_client_id or settings.msal_client_id
+        ),
+        aad_token_cache_path=(
+            payload.aad_token_cache_path or settings.msal_token_cache_path
+        ),
     )
     user.set_scopes(payload.scopes or [])
     db.add(user)
@@ -46,6 +55,9 @@ async def create_user(
         email=user.email,
         scopes=user.get_scopes(),
         is_admin=user.is_admin,
+        aad_tenant_id=user.aad_tenant_id,
+        aad_public_client_id=user.aad_public_client_id,
+        aad_token_cache_path=user.aad_token_cache_path,
     )
 
 
@@ -67,6 +79,9 @@ async def list_users(
             email=user.email,
             scopes=user.get_scopes(),
             is_admin=user.is_admin,
+            aad_tenant_id=user.aad_tenant_id,
+            aad_public_client_id=user.aad_public_client_id,
+            aad_token_cache_path=user.aad_token_cache_path,
         )
         for user in users
     ]
@@ -90,6 +105,9 @@ async def get_user(
         email=user.email,
         scopes=user.get_scopes(),
         is_admin=user.is_admin,
+        aad_tenant_id=user.aad_tenant_id,
+        aad_public_client_id=user.aad_public_client_id,
+        aad_token_cache_path=user.aad_token_cache_path,
     )
 
 
@@ -131,6 +149,9 @@ async def update_user(
         email=user.email,
         scopes=user.get_scopes(),
         is_admin=user.is_admin,
+        aad_tenant_id=user.aad_tenant_id,
+        aad_public_client_id=user.aad_public_client_id,
+        aad_token_cache_path=user.aad_token_cache_path,
     )
 
 
