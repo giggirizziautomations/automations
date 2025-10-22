@@ -1,5 +1,13 @@
 """Pydantic schemas for API input and output."""
 
-from .powerbi import DeviceTokenResponse
+from .powerbi import (
+    DeviceCodeCompleteRequest,
+    DeviceCodeInitiationResponse,
+    DeviceTokenResponse,
+)
 
-__all__ = ["DeviceTokenResponse"]
+__all__ = [
+    "DeviceCodeCompleteRequest",
+    "DeviceCodeInitiationResponse",
+    "DeviceTokenResponse",
+]

@@ -20,6 +20,9 @@ Stack FastAPI pronto per ambienti di produzione, progettato per crescere in ecos
 7. Crea un amministratore: `python -m app.cli.create_admin Nome Cognome email@example.com --password ****`.
 8. Crea un client credenziali: `python -m app.cli.create_client "Reporting" --client-id reporting-service --scope reports:read`.
    - In alternativa puoi passare il `client_id` come secondo argomento posizionale: `python -m app.cli.create_client "Reporting" reporting-service`.
+9. Esegui un login MSAL di prova usando gli endpoint `/powerbi/device-login` e `/powerbi/device-login/complete` con un token utente oppure, in alternativa, dal terminale con `./run.sh aad-login`.
+   - L'endpoint di avvio restituisce il codice dispositivo e le istruzioni fornite da Microsoft Entra; quello di completamento conclude il flusso e restituisce il token MSAL.
+   - Entrambi riutilizzano il `PUBLIC_CLIENT_ID` configurato sul profilo dell'utente autenticato e l'`aad_tenant_id` salvato sul database.
 9. Esegui un login MSAL di prova usando l'endpoint `/powerbi/device-login` con un token utente o, in alternativa, dal terminale con `./run.sh aad-login`.
    - L'endpoint riutilizza il `PUBLIC_CLIENT_ID` configurato sul profilo dell'utente autenticato e l'`aad_tenant_id` salvato sul database.
    - Il comando CLI continua a funzionare per scenari manuali o offline e salva i token nella cache configurata.
@@ -126,7 +129,8 @@ curl -X POST \
 - `GET /users` richiede token admin.
 - `GET /reports` richiede lo scope `reports:read`.
 - `GET /me` restituisce il profilo corrente.
-- `POST /powerbi/device-login` avvia il flusso device code MSAL e restituisce il token ottenuto.
+- `POST /powerbi/device-login` avvia il flusso device code MSAL e restituisce il codice dispositivo.
+- `POST /powerbi/device-login/complete` conclude il flusso device code MSAL e restituisce il token ottenuto.
 
 Utilizza l'header `Authorization: Bearer <token>` nelle richieste.
 
@@ -135,6 +139,33 @@ Utilizza l'header `Authorization: Bearer <token>` nelle richieste.
 Per ottenere un token tramite device code flow MSAL (con supporto MFA):
 
 ```bash
+# 1) Avvio del flusso: ottieni il codice dispositivo
+curl -X POST \
+  -H "Authorization: Bearer <JWT utente>" \
+  http://localhost:8000/powerbi/device-login
+
+# Risposta (estratto)
+{
+  "flow_id": "<identificativo>",
+  "user_code": "CODE-123",
+  "verification_uri": "https://microsoft.com/devicelogin",
+  "message": "Per completare l'accesso visita ..."
+}
+
+# 2) Completa l'autenticazione da browser seguendo le istruzioni restituite (supporta MFA)
+
+# 3) Recupera il token MSAL una volta completato l'accesso
+curl -X POST \
+  -H "Authorization: Bearer <JWT utente>" \
+  -H "Content-Type: application/json" \
+  -d '{"flow_id":"<identificativo>"}' \
+  http://localhost:8000/powerbi/device-login/complete
+```
+
+Gli endpoint recuperano il tenant (`aad_tenant_id`) e il client MSAL (`aad_public_client_id`) dal profilo dell'utente associato al token
+e mantengono lo stato del flusso fino alla scadenza. Assicurati che gli utenti abbiano un `aad_tenant_id` valorizzato (viene popolato
+automaticamente usando `TENANT_ID` durante la creazione) e, se vuoi persistere i token fra esecuzioni, configura `aad_token_cache_path`
+o il relativo default in `TOKEN_CACHE_PATH`. In alternativa agli endpoint HTTP puoi avviare il flusso direttamente da terminale con
 curl -X POST \
   -H "Authorization: Bearer <JWT utente>" \
   http://localhost:8000/powerbi/device-login

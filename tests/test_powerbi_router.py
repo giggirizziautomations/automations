@@ -73,11 +73,25 @@ def test_device_login_uses_user_specific_configuration(
     token = _obtain_token(api_client, email=user.email, password=password)
 
     captured: dict[str, object] = {}
+    flow_payload = {
+        "user_code": "ABC123",
+        "verification_uri": "https://login.microsoftonline.com/common/oauth2/deviceauth",
+        "verification_uri_complete": "https://login.microsoftonline.com/common/oauth2/deviceauth?code=ABC123",
+        "device_code": "device-code",
+        "message": "Please authenticate",
+        "expires_in": 900,
+        "interval": 5,
+    }
 
     class _DummyService:
         def __init__(self, **kwargs: object) -> None:  # pragma: no cover - simple store
             captured.update(kwargs)
 
+        def initiate_device_flow(self) -> dict[str, object]:
+            return flow_payload
+
+        def acquire_token_with_flow(self, flow: dict[str, object]) -> dict[str, str]:
+            assert flow is flow_payload
         def acquire_token(self) -> dict[str, str]:
             return {"access_token": "dummy-token", "token_type": "Bearer"}
 
@@ -89,6 +103,26 @@ def test_device_login_uses_user_specific_configuration(
     )
 
     assert response.status_code == 200
+    init_body = response.json()
+    assert init_body["flow_id"]
+    assert init_body["user_code"] == flow_payload["user_code"]
+    assert init_body["verification_uri"] == flow_payload["verification_uri"]
+    assert (
+        init_body["verification_uri_complete"]
+        == flow_payload["verification_uri_complete"]
+    )
+    assert init_body["message"] == flow_payload["message"]
+    assert init_body["expires_in"] == flow_payload["expires_in"]
+    assert init_body["interval"] == flow_payload["interval"]
+
+    completion = api_client.post(
+        "/powerbi/device-login/complete",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"flow_id": init_body["flow_id"]},
+    )
+
+    assert completion.status_code == 200
+    body = completion.json()
     body = response.json()
     assert body["access_token"] == "dummy-token"
 
@@ -128,6 +162,15 @@ def test_device_login_requires_tenant_configuration(
 
 
 def test_device_login_requires_authentication(api_client: TestClient) -> None:
+    response_init = api_client.post("/powerbi/device-login")
+
+    assert response_init.status_code == 401
+
+    response_complete = api_client.post(
+        "/powerbi/device-login/complete", json={"flow_id": "dummy"}
+    )
+
+    assert response_complete.status_code == 401
     response = api_client.post("/powerbi/device-login")
 
     assert response.status_code == 401

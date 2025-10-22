@@ -194,3 +194,32 @@ def test_device_code_service_device_flow_method_runs_interactively() -> None:
     assert result == token
     assert client.initiated_with == [["scope/.default"]]
     assert client.received_flow == [flow]
+
+
+def test_device_code_service_supports_resuming_flow() -> None:
+    """A flow can be initiated and completed in separate calls."""
+
+    flow = {
+        "user_code": "ABCD1234",
+        "verification_uri_complete": "https://login.microsoftonline.com/complete",
+    }
+    token = {"access_token": "token", "token_type": "Bearer"}
+    client = _FakeClient(flow, token)
+
+    service = DeviceCodeLoginService(
+        client_id="client-id",
+        authority="https://login.microsoftonline.com/common",
+        scopes=["scope/.default"],
+        client=client,
+        open_browser=False,
+    )
+
+    initiated_flow = service.initiate_device_flow()
+    assert initiated_flow == flow
+    assert client.initiated_with == [["scope/.default"]]
+    assert client.received_flow == []
+
+    result = service.acquire_token_with_flow(flow)
+
+    assert result == token
+    assert client.received_flow == [flow]
