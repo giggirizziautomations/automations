@@ -23,6 +23,8 @@ Stack FastAPI pronto per ambienti di produzione, progettato per crescere in ecos
 9. Esegui un login MSAL di prova usando gli endpoint `/powerbi/device-login` e `/powerbi/device-login/complete` con un token utente oppure, in alternativa, dal terminale con `./run.sh aad-login`.
    - L'endpoint di avvio restituisce il codice dispositivo e le istruzioni fornite da Microsoft Entra; quello di completamento conclude il flusso e restituisce il token MSAL.
    - Entrambi riutilizzano il `PUBLIC_CLIENT_ID` configurato sul profilo dell'utente autenticato e l'`aad_tenant_id` salvato sul database.
+9. Esegui un login MSAL di prova usando l'endpoint `/powerbi/device-login` con un token utente o, in alternativa, dal terminale con `./run.sh aad-login`.
+   - L'endpoint riutilizza il `PUBLIC_CLIENT_ID` configurato sul profilo dell'utente autenticato e l'`aad_tenant_id` salvato sul database.
    - Il comando CLI continua a funzionare per scenari manuali o offline e salva i token nella cache configurata.
 10. Avvia il server di sviluppo: `uvicorn app.main:app --reload` oppure `./run.sh server`.
 
@@ -164,6 +166,16 @@ Gli endpoint recuperano il tenant (`aad_tenant_id`) e il client MSAL (`aad_publi
 e mantengono lo stato del flusso fino alla scadenza. Assicurati che gli utenti abbiano un `aad_tenant_id` valorizzato (viene popolato
 automaticamente usando `TENANT_ID` durante la creazione) e, se vuoi persistere i token fra esecuzioni, configura `aad_token_cache_path`
 o il relativo default in `TOKEN_CACHE_PATH`. In alternativa agli endpoint HTTP puoi avviare il flusso direttamente da terminale con
+curl -X POST \
+  -H "Authorization: Bearer <JWT utente>" \
+  http://localhost:8000/powerbi/device-login
+```
+
+L'endpoint recupera il tenant (`aad_tenant_id`) e il client MSAL (`aad_public_client_id`) dal profilo dell'utente associato al token
+e avvia il device code flow aprendo il browser con il codice precompilato. Al termine restituisce il token MSAL, che può essere
+riutilizzato per chiamare le API di Power BI. Assicurati che gli utenti abbiano un `aad_tenant_id` valorizzato (viene popolato
+automaticamente usando `TENANT_ID` durante la creazione) e, se vuoi persistere i token fra esecuzioni, configura `aad_token_cache_path`
+o il relativo default in `TOKEN_CACHE_PATH`. In alternativa all'endpoint HTTP puoi avviare il flusso direttamente da terminale con
 `./run.sh aad-login`.
 
 ## Logging e osservabilità

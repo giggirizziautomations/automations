@@ -101,6 +101,12 @@ class DeviceCodeLoginService:
             self._persist_cache()
             return result
 
+    def acquire_token_device_flow(self) -> Mapping[str, object]:
+        """Run the interactive device code flow regardless of cached tokens."""
+
+        with self._lock:
+            return self._acquire_token_device_flow_locked()
+
     def _build_client(self) -> Any:
         """Create a PublicClientApplication with optional token caching."""
 
@@ -183,6 +189,29 @@ class DeviceCodeLoginService:
         return self._acquire_token_with_flow_locked(flow)
 
     def _create_device_flow_locked(self) -> MutableMapping[str, object]:
+        flow = self._initiate_flow()
+        verification_url = _build_verification_url(flow)
+        if self._open_browser and verification_url:
+            try:
+                self._browser_opener(verification_url)
+            except Exception:  # pragma: no cover - platform dependent
+                logger.exception("Unable to open browser for device code login")
+
+        result = self._client.acquire_token_by_device_flow(flow)
+        if "access_token" not in result:
+            error_description = result.get("error_description")
+            error = result.get("error")
+            msg = (
+                error_description
+                or error
+                or "Device code flow did not return a token"
+            )
+            raise DeviceCodeLoginError(msg)
+
+        self._persist_cache()
+        return result
+
+    def _initiate_flow(self) -> MutableMapping[str, object]:
         """Start the MSAL device code flow."""
 
         try:

@@ -18,6 +18,7 @@ from app.schemas import (
     DeviceCodeInitiationResponse,
     DeviceTokenResponse,
 )
+from app.schemas import DeviceTokenResponse
 from app.services import DeviceCodeLoginError, DeviceCodeLoginService
 
 
@@ -35,6 +36,9 @@ def _resolve_authority(tenant: str) -> str:
 
 def _build_device_login_service(
     *, user: models.User, settings: Settings
+def get_device_login_service(
+    user: models.User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
 ) -> DeviceCodeLoginService:
     """Construct a device login service using per-user configuration."""
 

@@ -92,6 +92,7 @@ def test_device_login_uses_user_specific_configuration(
 
         def acquire_token_with_flow(self, flow: dict[str, object]) -> dict[str, str]:
             assert flow is flow_payload
+        def acquire_token(self) -> dict[str, str]:
             return {"access_token": "dummy-token", "token_type": "Bearer"}
 
     monkeypatch.setattr("app.routers.powerbi.DeviceCodeLoginService", _DummyService)
@@ -122,6 +123,7 @@ def test_device_login_uses_user_specific_configuration(
 
     assert completion.status_code == 200
     body = completion.json()
+    body = response.json()
     assert body["access_token"] == "dummy-token"
 
     assert captured["client_id"] == user.aad_public_client_id
@@ -169,3 +171,6 @@ def test_device_login_requires_authentication(api_client: TestClient) -> None:
     )
 
     assert response_complete.status_code == 401
+    response = api_client.post("/powerbi/device-login")
+
+    assert response.status_code == 401
