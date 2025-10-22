@@ -123,7 +123,6 @@ def test_device_login_uses_user_specific_configuration(
 
     assert completion.status_code == 200
     body = completion.json()
-    body = response.json()
     assert body["access_token"] == "dummy-token"
 
     assert captured["client_id"] == user.aad_public_client_id

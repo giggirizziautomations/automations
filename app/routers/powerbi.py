@@ -5,7 +5,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
-from typing import MutableMapping
+from typing import Mapping, MutableMapping
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -18,7 +18,6 @@ from app.schemas import (
     DeviceCodeInitiationResponse,
     DeviceTokenResponse,
 )
-from app.schemas import DeviceTokenResponse
 from app.services import DeviceCodeLoginError, DeviceCodeLoginService
 
 
@@ -36,9 +35,6 @@ def _resolve_authority(tenant: str) -> str:
 
 def _build_device_login_service(
     *, user: models.User, settings: Settings
-def get_device_login_service(
-    user: models.User = Depends(get_current_user),
-    settings: Settings = Depends(get_settings),
 ) -> DeviceCodeLoginService:
     """Construct a device login service using per-user configuration."""
 
@@ -71,6 +67,15 @@ def get_device_login_service(
         open_browser=settings.msal_open_browser,
         token_cache_path=token_cache_path,
     )
+
+
+def get_device_login_service(
+    user: models.User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+) -> DeviceCodeLoginService:
+    """FastAPI dependency that yields a configured login service."""
+
+    return _build_device_login_service(user=user, settings=settings)
 
 
 @dataclass
@@ -188,7 +193,13 @@ async def complete_device_login(
     except DeviceCodeLoginError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return DeviceTokenResponse.model_validate(token_data)
+    if not isinstance(token_data, Mapping):
+        try:
+            token_data = await run_in_threadpool(pending.service.acquire_token)
+        except DeviceCodeLoginError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return DeviceTokenResponse.model_validate(dict(token_data))
 
 
 __all__ = ["router"]
