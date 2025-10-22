@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import List
+from typing import List, Optional
 
 import typer
 
@@ -12,6 +13,9 @@ def create(
     name: str = typer.Argument(..., help="Nome dell'applicazione client"),
     client_id: str = typer.Option(
         ..., "--client-id", "-c", prompt=True, help="Identificativo client scelto dall'amministratore"
+    ),
+    client_id: Optional[str] = typer.Argument(
+        None, help="Identificativo client scelto dall'amministratore"
     ),
     scopes: List[str] = typer.Option(
         [],
@@ -36,6 +40,20 @@ def create(
     if not normalized_client_id:
         typer.secho(
             "Errore: devi specificare un client_id scelto dall'amministratore.",
+            "Esempio: python -m app.cli.create_client my-app my-client-id --scope reports:read",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    normalized_client_id = (client_id or "").strip()
+    if not normalized_client_id:
+        typer.secho(
+            "Errore: devi specificare un client_id scelto dall'amministratore.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        typer.secho(
+            "Esempio: python -m app.cli.create_client my-app my-client-id --scope reports:read",
             err=True,
             fg=typer.colors.RED,
         )
