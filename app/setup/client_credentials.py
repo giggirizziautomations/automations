@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+import secrets
 import uuid
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,9 @@ def _normalize_scopes(scopes: Sequence[str] | None) -> list[str]:
 
 
 def generate_client_secret() -> str:
+    """Generate a 64-character random secret."""
+
+    return secrets.token_hex(32)
     """Generate a 64-character GUID-style secret."""
 
     return uuid.uuid4().hex + uuid.uuid4().hex

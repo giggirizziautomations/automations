@@ -1,6 +1,7 @@
 """CLI utility for creating client credential entries."""
 from __future__ import annotations
 
+from typing import List
 from typing import List, Optional
 
 import typer
@@ -9,8 +10,9 @@ from app.setup.client_credentials import create_client_application
 
 
 def create(
-    name: Optional[str] = typer.Argument(
-        None, help="Nome dell'applicazione client"
+    name: str = typer.Argument(..., help="Nome dell'applicazione client"),
+    client_id: str = typer.Option(
+        ..., "--client-id", "-c", prompt=True, help="Identificativo client scelto dall'amministratore"
     ),
     client_id: Optional[str] = typer.Argument(
         None, help="Identificativo client scelto dall'amministratore"
@@ -25,14 +27,19 @@ def create(
 ) -> None:
     """Create a new client credentials application."""
 
-    normalized_name = (name or "").strip()
+    normalized_name = name.strip()
     if not normalized_name:
         typer.secho(
             "Errore: il nome dell'applicazione client non può essere vuoto.",
             err=True,
             fg=typer.colors.RED,
         )
+        raise typer.Exit(code=1)
+
+    normalized_client_id = client_id.strip()
+    if not normalized_client_id:
         typer.secho(
+            "Errore: devi specificare un client_id scelto dall'amministratore.",
             "Esempio: python -m app.cli.create_client my-app my-client-id --scope reports:read",
             err=True,
         )
@@ -48,6 +55,7 @@ def create(
         typer.secho(
             "Esempio: python -m app.cli.create_client my-app my-client-id --scope reports:read",
             err=True,
+            fg=typer.colors.RED,
         )
         raise typer.Exit(code=1)
 
