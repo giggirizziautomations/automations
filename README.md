@@ -19,6 +19,7 @@ Stack FastAPI pronto per ambienti di produzione, progettato per crescere in ecos
 6. Genera un secret JWT: `python -m app.cli.jwt_keygen` (verrà aggiunto automaticamente al tuo `.env`, insieme ad eventuali aggiornamenti di `JWT_SECRET`).
 7. Crea un amministratore: `python -m app.cli.create_admin Nome Cognome email@example.com --password ****`.
 8. Crea un client credenziali: `python -m app.cli.create_client "Reporting" --client-id reporting-service --scope reports:read`.
+   - In alternativa puoi passare il `client_id` come secondo argomento posizionale: `python -m app.cli.create_client "Reporting" reporting-service`.
 9. Avvia il server di sviluppo: `uvicorn app.main:app --reload` oppure `./run.sh server`.
 
 ### Sequenza comandi da tastiera
@@ -61,6 +62,7 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `./run.sh jwt-keygen` | Genera e salva un secret JWT |
 | `./run.sh create-admin ...` | Crea un utente amministratore |
 | `./run.sh create-client --client-id <id> --scope ...` | Crea un'applicazione client credential |
+| `./run.sh create-client <id> --scope ...` | Variante con `client_id` posizionale |
 | `./run.sh server` | Avvia Uvicorn in modalità reload |
 | `./run.sh test` | Esegue la suite di test con Pytest |
 
