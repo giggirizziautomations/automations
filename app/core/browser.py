@@ -3,14 +3,17 @@ from __future__ import annotations
 
 import logging
 
-from playwright.async_api import async_playwright
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - imported for type checkers only
+    from playwright.async_api import Playwright
 
 
 logger = logging.getLogger(__name__)
 
 
 async def open_webpage(url: str, invoked_by: str) -> dict[str, str]:
-    """Open ``url`` in a headless browser on behalf of ``invoked_by``.
+    """Open ``url`` in a headed browser on behalf of ``invoked_by``.
 
     Parameters
     ----------
@@ -33,20 +36,27 @@ async def open_webpage(url: str, invoked_by: str) -> dict[str, str]:
 
     logger.info("Opening %s for user %s", url, invoked_by)
 
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch()
-        page = await browser.new_page()
+    from playwright.async_api import async_playwright
 
-        try:
-            await page.goto(url, wait_until="domcontentloaded")
-        except Exception:
-            logger.exception("Failed to open %s for %s", url, invoked_by)
-            raise
-        finally:
-            await browser.close()
+    playwright = await async_playwright().start()
+    try:
+        browser = await playwright.chromium.launch(headless=False)
+    except Exception:
+        await playwright.stop()
+        raise
+
+    page = await browser.new_page()
+
+    try:
+        await page.goto(url, wait_until="domcontentloaded")
+    except Exception:
+        logger.exception("Failed to open %s for %s", url, invoked_by)
+        await browser.close()
+        await playwright.stop()
+        raise
 
     logger.info("Successfully opened %s for user %s", url, invoked_by)
-
+    # Intentionally keep the browser session alive so that the page stays open.
     return {"status": "opened", "url": url, "user": invoked_by}
 
 
