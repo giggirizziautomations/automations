@@ -185,4 +185,47 @@ La suite copre:
 
 ## Struttura del progetto
 
-La struttura completa è riportata in fondo alla risposta del bot (albero dei file).
+```text
+.
+├── app
+│   ├── cli
+│   │   ├── create_admin.py
+│   │   ├── create_client.py
+│   │   ├── jwt_keygen.py
+│   │   ├── keygen.py
+│   │   └── utils.py
+│   ├── core
+│   │   ├── auth.py
+│   │   ├── config.py
+│   │   ├── logging.py
+│   │   └── security.py
+│   ├── db
+│   │   ├── base.py
+│   │   ├── init_db.py
+│   │   └── models.py
+│   ├── routers
+│   │   ├── auth.py
+│   │   ├── me.py
+│   │   ├── reports.py
+│   │   └── users.py
+│   ├── schemas
+│   │   ├── auth.py
+│   │   ├── client.py
+│   │   └── user.py
+│   ├── setup
+│   │   └── client_credentials.py
+│   └── main.py
+├── tests
+│   ├── conftest.py
+│   ├── test_auth_client.py
+│   ├── test_auth_password.py
+│   ├── test_cli_admin.py
+│   ├── test_security.py
+│   ├── test_setup_client_credentials.py
+│   └── test_users_self_service.py
+├── requirements.txt
+├── requirements-dev.txt
+├── run.sh
+├── pyproject.toml
+└── README.md
+```
