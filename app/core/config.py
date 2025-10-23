@@ -124,11 +124,23 @@ def _get_scopes() -> tuple[str, ...]:
 
 
 def _parse_csv(raw_value: str | None) -> tuple[str, ...]:
-    """Parse a comma-separated string into a tuple of scopes."""
+    """Parse a comma-separated string into a tuple of scopes.
+
+    Legacy configurations historically used commas as separators but many
+    deployments stored values copied from documentation using whitespace.
+    To remain backward compatible we split on commas first and then further
+    tokenise by whitespace to ensure individual scopes are returned.
+    """
 
     if not raw_value:
         return tuple()
-    scopes = [scope.strip() for scope in raw_value.split(",") if scope.strip()]
+
+    scopes: list[str] = []
+    for chunk in raw_value.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        scopes.extend(part for part in chunk.split() if part)
     return tuple(scopes)
 
 
