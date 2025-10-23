@@ -35,9 +35,6 @@ async def get_me(user: models.User = Depends(get_current_user)) -> UserOut:
         email=user.email,
         scopes=user.get_scopes(),
         is_admin=user.is_admin,
-        aad_tenant_id=user.aad_tenant_id,
-        aad_public_client_id=user.aad_public_client_id,
-        aad_token_cache_path=user.aad_token_cache_path,
     )
 
 
@@ -73,7 +70,4 @@ async def update_me(
         email=user.email,
         scopes=user.get_scopes(),
         is_admin=user.is_admin,
-        aad_tenant_id=user.aad_tenant_id,
-        aad_public_client_id=user.aad_public_client_id,
-        aad_token_cache_path=user.aad_token_cache_path,
     )
