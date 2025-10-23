@@ -95,7 +95,13 @@ async def playwright_device_login(
     try:
         token_data = await run_in_threadpool(automation.authenticate)
     except DeviceCodeLoginError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        detail: dict[str, object] = {
+            "error": "device_login_failed",
+            "message": str(exc) or "Device login failed for an unknown reason",
+        }
+        if exc.__cause__:
+            detail["cause"] = repr(exc.__cause__)
+        raise HTTPException(status_code=502, detail=detail) from exc
 
     return DeviceTokenResponse.model_validate(dict(token_data))
 

@@ -255,4 +255,6 @@ def test_device_login_propagates_errors(
     )
 
     assert response.status_code == 502
-    assert response.json()["detail"] == "boom"
+    detail = response.json()["detail"]
+    assert detail["error"] == "device_login_failed"
+    assert detail["message"] == "boom"
