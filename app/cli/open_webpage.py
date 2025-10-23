@@ -12,7 +12,7 @@ def launch(
     url: str = typer.Argument(..., help="Address of the page to open"),
     user: str = typer.Argument(..., help="Identifier of the user invoking the command"),
 ) -> None:
-    """Launch a headless browser session to open ``url`` for ``user``."""
+    """Launch a headed browser session to open ``url`` for ``user``."""
 
     asyncio.run(open_webpage(url, user))
     typer.echo(f"Opened {url} for user {user}.")

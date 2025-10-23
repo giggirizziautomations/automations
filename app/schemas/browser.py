@@ -10,7 +10,6 @@ class WebpageOpenRequest(BaseModel):
     """Payload to request the opening of a webpage."""
 
     url: AnyHttpUrl = Field(..., description="Address of the page to load")
-    user: str = Field(..., min_length=1, description="Identifier of the user issuing the request")
 
 
 class WebpageOpenResponse(BaseModel):
@@ -18,7 +17,9 @@ class WebpageOpenResponse(BaseModel):
 
     status: Literal["opened"] = Field("opened", description="Result of the navigation attempt")
     url: AnyHttpUrl = Field(..., description="Address of the page that was opened")
-    user: str = Field(..., description="Identifier of the user who initiated the request")
+    user: str = Field(
+        ..., description="Identifier of the authenticated user who initiated the request"
+    )
 
 
 __all__ = ["WebpageOpenRequest", "WebpageOpenResponse"]
