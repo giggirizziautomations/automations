@@ -52,8 +52,6 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `JWT_SECRET` | Secret per firmare i JWT HS256 | _obbligatorio_ |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Durata access token in minuti | `15` |
 | `LOG_LEVEL` | Livello di log dell'applicazione | `INFO` |
-| `POWER_AUTOMATE_FLOW_URL` | URL del flow Power Automate da invocare | _vuoto_ |
-| `POWER_AUTOMATE_TIMEOUT_SECONDS` | Timeout massimo per l'esecuzione del flow | `60` |
 
 ## Comandi utili
 

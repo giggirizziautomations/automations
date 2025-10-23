@@ -20,21 +20,9 @@ class Settings(BaseModel):
     jwt_secret: Optional[str] = None
     access_token_expire_minutes: int = Field(default=15, ge=1)
     log_level: str = Field(default="INFO")
-    power_automate_flow_url: Optional[str] = None
-    power_automate_timeout_seconds: int = Field(default=60, ge=1)
 
     class Config:
         frozen = True
-
-
-def _get_env(name: str) -> Optional[str]:
-    """Read an environment variable stripping whitespace and empty values."""
-
-    value = os.getenv(name)
-    if value is None:
-        return None
-    value = value.strip()
-    return value or None
 
 
 def _build_settings() -> Settings:
@@ -49,10 +37,6 @@ def _build_settings() -> Settings:
             os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
         ),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
-        power_automate_flow_url=_get_env("POWER_AUTOMATE_FLOW_URL"),
-        power_automate_timeout_seconds=int(
-            os.getenv("POWER_AUTOMATE_TIMEOUT_SECONDS", "60")
-        ),
     )
 
 
