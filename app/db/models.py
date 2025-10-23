@@ -3,7 +3,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 
 from app.core.security import normalize_scopes, scopes_to_string
 from app.db.base import Base
@@ -64,4 +72,15 @@ class ClientApp(Base):
         return normalize_scopes(self.scopes)
 
 
-__all__ = ["User", "ClientApp"]
+class MicrosoftServiceToken(Base):
+    """Persisted Microsoft service access tokens for end users."""
+
+    __tablename__ = "microsoft_service_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    access_token = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+__all__ = ["User", "ClientApp", "MicrosoftServiceToken"]
