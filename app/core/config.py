@@ -39,6 +39,8 @@ class Settings(BaseModel):
     msal_token_cache_path: Optional[str] = Field(
         default="./data/aad_user_token_cache.json"
     )
+    power_automate_flow_url: Optional[str] = None
+    power_automate_timeout_seconds: int = Field(default=60, ge=1)
 
     class Config:
         frozen = True
@@ -66,6 +68,10 @@ def _build_settings() -> Settings:
         msal_scopes=raw_scopes,
         msal_open_browser=_parse_bool(os.getenv("MSAL_OPEN_BROWSER", "true")),
         msal_token_cache_path=_resolve_cache_path(),
+        power_automate_flow_url=_get_env("POWER_AUTOMATE_FLOW_URL"),
+        power_automate_timeout_seconds=int(
+            os.getenv("POWER_AUTOMATE_TIMEOUT_SECONDS", "60")
+        ),
     )
 
 
