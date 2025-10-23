@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from app.core.config import get_settings
 from app.core.logging import configure_app_logging
 from app.routers import auth
+from app.routers import browser as browser_router
 from app.routers import me as me_router
 from app.routers import reports as reports_router
 from app.routers import users as users_router
@@ -20,6 +21,7 @@ app.include_router(auth.client_router)
 app.include_router(users_router.router)
 app.include_router(me_router.router)
 app.include_router(reports_router.router)
+app.include_router(browser_router.router)
 
 
 @app.get("/health", tags=["health"])
