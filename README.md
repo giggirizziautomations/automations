@@ -90,6 +90,50 @@ Tutti i comandi sono invocabili anche con `python -m ...` se preferisci non usar
 > Il comando mostrerà il `client_secret` una sola volta: salvalo in modo sicuro perché
 > non potrà essere recuperato dal database in chiaro.
 
+## Gestione del servizio
+
+Per ambienti permanenti puoi registrare l'applicazione come servizio `systemd` così da
+gestirla con i classici comandi `systemctl`.
+
+1. Installa le dipendenze nel percorso definitivo (es. `/opt/automations`) e crea il file
+   `/etc/systemd/system/automations.service` con i permessi di root:
+
+   ```ini
+   [Unit]
+   Description=Automations API
+   After=network.target
+
+   [Service]
+   Type=simple
+   WorkingDirectory=/opt/automations
+   EnvironmentFile=/opt/automations/.env
+   ExecStart=/opt/automations/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+   Restart=on-failure
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+   Adatta i percorsi a seconda della tua installazione (virtualenv, porta di ascolto, ecc.).
+
+2. Ricarica la configurazione e avvia il servizio:
+
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now automations.service
+   ```
+
+3. Monitora lo stato e i log con:
+
+   ```bash
+   systemctl status automations.service
+   journalctl -u automations.service -f
+   ```
+
+Quando è registrato come servizio puoi riavviare, fermare o aggiornare l'applicazione con i
+classici comandi `systemctl restart|stop automations.service` e gestire i segreti tramite il file
+`EnvironmentFile` o tramite variabili definite direttamente nell'unità.
+
 ## Flussi di autenticazione
 
 ### Password grant (utente)
