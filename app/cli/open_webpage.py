@@ -14,8 +14,13 @@ def launch(
 ) -> None:
     """Launch a headed browser session to open ``url`` for ``user``."""
 
-    asyncio.run(open_webpage(url, user))
-    typer.echo(f"Opened {url} for user {user}.")
+    metadata = asyncio.run(open_webpage(url, user))
+
+    if metadata.get("is_microsoft_login"):
+        typer.echo(
+            "Detected a Microsoft authentication page at "
+            f"{metadata.get('url', url)} for user {user}."
+        )
 
 
 if __name__ == "__main__":
