@@ -65,8 +65,16 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `./run.sh create-client <id> --scope ...` | Variante con `client_id` posizionale |
 | `./run.sh server` | Avvia Uvicorn in modalità reload |
 | `./run.sh test` | Esegue la suite di test con Pytest |
+| `python -m app.cli.open_webpage <url> <user>` | Apre una pagina web in un browser visibile |
 
 Tutti i comandi sono invocabili anche con `python -m ...` se preferisci non usare lo script shell.
+
+### Apertura di pagine web
+
+Il comando `python -m app.cli.open_webpage <url> <user>` (o la relativa API `/browser/open`) avvia
+un browser Chromium con interfaccia grafica, raggiunge l'indirizzo richiesto e attende il completamento
+del caricamento (stato `networkidle`) prima di restituire il controllo. Il browser rimane aperto dopo la
+navigazione così da consentire eventuali interazioni manuali con la pagina già caricata.
 
 > ℹ️ **Nuova istruzione:** per i client `client_credentials` fornisci sempre un `client_id` esplicito.
 > Il comando mostrerà il `client_secret` una sola volta: salvalo in modo sicuro perché
