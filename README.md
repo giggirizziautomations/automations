@@ -66,6 +66,7 @@ Le variabili di ambiente principali possono essere caricate tramite `.env` grazi
 | `./run.sh server` | Avvia Uvicorn in modalità reload |
 | `./run.sh test` | Esegue la suite di test con Pytest |
 | `python -m app.cli.open_webpage <url> <user>` | Apre una pagina web in un browser visibile |
+| `python -m app.cli.scrape_site <site> <user_id>` | Avvia una sessione di scraping configurata nel database |
 
 Tutti i comandi sono invocabili anche con `python -m ...` se preferisci non usare lo script shell.
 
@@ -75,6 +76,75 @@ Il comando `python -m app.cli.open_webpage <url> <user>` (o la relativa API `/br
 un browser Chromium con interfaccia grafica, raggiunge l'indirizzo richiesto e attende il completamento
 del caricamento (stato `networkidle`) prima di restituire il controllo. Il browser rimane aperto dopo la
 navigazione così da consentire eventuali interazioni manuali con la pagina già caricata.
+
+### Scraping configurabile
+
+Il comando `python -m app.cli.scrape_site <site_name> <user_id>` riutilizza le configurazioni salvate
+nella tabella `scraping_targets` per avviare una sessione di scraping in Playwright. Ogni record contiene:
+
+- `user_id`: collegamento all'utente che ha definito l'operazione;
+- `site_name`: identificativo mnemonico dell'operazione;
+- `url`: indirizzo da aprire nel browser;
+- `recipe`: nome della ricetta da utilizzare (`default` o `save_screenshot` di default);
+- `parameters`: JSON opzionale con impostazioni aggiuntive (es. `{ "settle_ms": 2000 }`).
+
+Per avviare la sessione in modalità non headless oppure salvare il report su file:
+
+```bash
+python -m app.cli.scrape_site my-site 1 --no-headless --output report.json
+```
+
+Se desideri lanciare lo scraping per conto di un altro operatore (ad esempio un analista o un membro
+del team di supporto) specifica `--invoked-by` per attribuire correttamente l'esecuzione:
+
+```bash
+python -m app.cli.scrape_site my-site 1 --invoked-by "support@example.com"
+```
+
+Il report JSON risultante include sia il proprietario della configurazione (`user`) sia l'operatore che
+ha avviato la sessione (`run_by`), così puoi tracciare chi ha effettuato l'esecuzione.
+
+Le istruzioni di scraping sono raccolte in `app/scraping/recipes.py` e sono suddivise in **azioni**
+atomiche. Il dizionario `SCRAPING_ACTIONS` elenca tutte le operazioni disponibili indicando per
+ognuna una breve descrizione, i campi obbligatori e quelli opzionali. Per costruire la tua routine
+aggiungi al campo `parameters` del record nel database una lista `actions` composta da dizionari con
+la forma `{"action": "nome", ...}`:
+
+```json
+{
+  "settle_ms": 1500,
+  "actions": [
+    { "action": "wait", "seconds": 1.5 },
+    { "action": "click", "selector": "button.login" },
+    { "action": "wait_for_element", "selector": "#username" },
+    { "action": "fill", "selector": "#username", "text": "demo" },
+    { "action": "fill", "selector": "#password", "text": "demo" },
+    { "action": "click", "selector": "button[type=submit]" },
+    { "action": "wait_for_element", "selector": "#result", "state": "visible" },
+    { "action": "get_text", "selector": "#result", "store_as": "result_text" }
+  ]
+}
+```
+
+Tra le azioni già disponibili trovi `wait`, `wait_for_element`, `click`, `fill`, `hover`, `scroll_to`,
+`get_text`, `get_attribute`, `save_html` e `screenshot`. Ogni azione accetta parametri autoesplicativi
+(es. `selector`, `seconds`, `store_as`, `path`). Puoi visionare la lista completa e i relativi campi
+direttamente nel file `app/scraping/recipes.py` oppure da una shell Python:
+
+```python
+from pprint import pprint
+from app.scraping.recipes import SCRAPING_ACTIONS
+
+pprint({name: {
+    "description": details["description"],
+    "required": details["required_fields"],
+    "optional": tuple(details["optional_fields"].keys()),
+} for name, details in SCRAPING_ACTIONS.items()})
+```
+
+Le ricette predefinite (`default`, `save_screenshot`) eseguono nell'ordine le azioni indicate, quindi
+puoi aggiungere nuove ricette o personalizzare quelle esistenti aggiornando il campo `recipe` del
+relativo record nel database.
 
 > ℹ️ **Nuova istruzione:** per i client `client_credentials` fornisci sempre un `client_id` esplicito.
 > Il comando mostrerà il `client_secret` una sola volta: salvalo in modo sicuro perché
