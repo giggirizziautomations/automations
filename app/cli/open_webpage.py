@@ -16,11 +16,12 @@ def launch(
 
     metadata = asyncio.run(open_webpage(url, user))
 
-    if metadata.get("is_microsoft_login"):
-        typer.echo(
-            "Detected a Microsoft authentication page at "
-            f"{metadata.get('url', url)} for user {user}."
+    typer.echo(
+        "Opened {page} for user {user}. Waiting completed for full load.".format(
+            page=metadata.get("url", url),
+            user=user,
         )
+    )
 
 
 if __name__ == "__main__":
