@@ -15,7 +15,9 @@ class WebpageOpenRequest(BaseModel):
 class WebpageOpenResponse(BaseModel):
     """Response returned after a page has been opened."""
 
-    status: Literal["opened"] = Field("opened", description="Result of the navigation attempt")
+    status: Literal["opened", "closed"] = Field(
+        ..., description="Result of the navigation attempt"
+    )
     url: AnyHttpUrl = Field(..., description="Address of the page that was opened")
     user: str = Field(
         ..., description="Identifier of the authenticated user who initiated the request"
