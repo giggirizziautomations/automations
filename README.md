@@ -87,6 +87,27 @@ nella tabella `scraping_targets` per avviare una sessione di scraping in Playwri
 - `url`: indirizzo da aprire nel browser;
 - `recipe`: nome della ricetta da utilizzare (`default` o `save_screenshot` di default);
 - `parameters`: JSON opzionale con impostazioni aggiuntive (es. `{ "settle_ms": 2000 }`).
+- `password`: password opzionale per lo scraping; se omessa viene riutilizzata quella dell'utente proprietario.
+
+Puoi creare queste configurazioni anche tramite API autenticata con un amministratore:
+
+```http
+POST /scraping-targets
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "user_id": 1,
+  "site_name": "my-site",
+  "url": "https://example.com/login",
+  "recipe": "default",
+  "parameters": {"settle_ms": 1500},
+  "notes": "Login di esempio",
+  "password": "PasswordDaUsare"
+}
+```
+
+La password viene cifrata automaticamente con la chiave Fernet. Se il campo è vuoto o assente, lo script di scraping decodificherà e userà la password dell'utente proprietario. Quando una password specifica è presente nel record, questa viene decifrata e resa disponibile alle ricette durante l'esecuzione (ad esempio nel parametro `password`).
 
 Per avviare la sessione in modalità non headless oppure salvare il report su file:
 
