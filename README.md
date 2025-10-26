@@ -170,29 +170,90 @@ relativo record nel database.
 ### Generazione guidata delle azioni
 
 Se desideri generare automaticamente la struttura JSON partendo dal codice HTML dell'elemento da
-interagire, puoi utilizzare i nuovi helper disponibili in `app.scraping.helpers`:
+interagire, puoi utilizzare i nuovi helper disponibili in `app.scraping.helpers`.
 
-```python
-from app.scraping.helpers import build_action_step, build_actions_document
+1. **Estrai lo snippet HTML di interesse** (ad esempio ispezionando la pagina con gli strumenti del
+   browser) e apri una shell Python nel progetto:
 
-html = '<button id="submit-login" class="btn">Login</button>'
+   ```bash
+   python
+   ```
 
-# Restituisce un singolo dizionario {"action": ..., "selector": ...}
-action = build_action_step(html, "click")
+2. **Genera gli step** tramite `build_action_step` o il documento completo con
+   `build_actions_document`:
 
-# Produce un documento completo pronto per essere serializzato e salvato nei parameters
-parameters = build_actions_document(html, "click", settle_ms=500)
-```
+   ```python
+   >>> from app.scraping.helpers import build_action_step, build_actions_document
+   >>> html = '<button id="submit-login" class="btn">Login</button>'
+   >>> build_action_step(html, "click")
+   {'action': 'click', 'selector': '#submit-login'}
+   >>> build_actions_document(html, "click", settle_ms=500)
+   {'actions': [{'action': 'click', 'selector': '#submit-login'}], 'settle_ms': 500}
+   ```
 
-Il generatore analizza il primo elemento presente nello snippet e costruisce un selettore CSS stabile
-utilizzando `id`, `class`, attributi `name` o `data-*`. Le azioni riconosciute includono:
+   Il generatore analizza il primo elemento presente nello snippet e costruisce un selettore CSS
+   stabile utilizzando `id`, `class`, attributi `name` o `data-*`. Le azioni riconosciute includono:
 
-- `wait`: crea automaticamente un'azione `wait_for_element` se è possibile dedurre un selettore,
-  altrimenti ripiega su un semplice `wait` di 1000ms;
-- `click`: produce un'azione `click` con il selettore più specifico disponibile;
-- `input text` (oltre ai sinonimi `fill`, `type`): crea un'azione `fill` valorizzando `value` con il
-  campo esplicito passato alla funzione oppure con `placeholder`/`value`/`aria-label` trovati
-  nell'HTML.
+   - `wait`: crea automaticamente un'azione `wait_for_element` se è possibile dedurre un selettore,
+     altrimenti ripiega su un semplice `wait` di 1000ms;
+   - `click`: produce un'azione `click` con il selettore più specifico disponibile;
+   - `input text` (oltre ai sinonimi `fill`, `type`): crea un'azione `fill` valorizzando `value` con il
+     campo esplicito passato alla funzione oppure con `placeholder`/`value`/`aria-label` trovati
+     nell'HTML.
+
+3. **Componi più step** concatenando l'output di `build_action_step` in un array. Un semplice script
+   può aiutarti a evitare copia/incolla manuali:
+
+   ```python
+   from app.scraping.helpers import build_action_step
+
+   snippets = [
+       ("<input name='email' placeholder='Email'>", "input text"),
+       ("<input name='password' type='password'>", "input text"),
+       ("<button type='submit' class='btn primary'>Accedi</button>", "click"),
+   ]
+
+   actions = [build_action_step(html, suggestion) for html, suggestion in snippets]
+   document = {"settle_ms": 800, "actions": actions}
+   ```
+
+4. **Invia il documento alle API di scraping**. L'endpoint `PUT /scraping-targets/{id}/actions`
+   sostituisce il blocco JSON associato a un target esistente. Esempio con `httpie` (dove `actions`
+   rappresenta l'array di step e `parameters` contiene i restanti campi del documento):
+
+   ```bash
+   http PUT :8000/scraping-targets/42/actions \
+     Authorization:'Bearer <token admin>' \
+     actions:='[{"action": "click", "selector": "#submit-login"}]' \
+     parameters:='{"settle_ms": 800}'
+   ```
+
+   oppure con `curl` combinando il documento generato con `jq` o salvandolo su file:
+
+   ```bash
+   python - <<'PY'
+   import json
+   from app.scraping.helpers import build_actions_document
+
+   html = '<button id="submit-login" class="btn">Login</button>'
+   document = build_actions_document(html, "click", settle_ms=500)
+   payload = {
+       "actions": document["actions"],
+       "parameters": {k: v for k, v in document.items() if k != "actions"},
+   }
+   print(json.dumps(payload))
+   PY > actions.json
+
+   curl -X PUT \
+     -H "Authorization: Bearer <token admin>" \
+     -H "Content-Type: application/json" \
+     --data @actions.json \
+     http://localhost:8000/scraping-targets/42/actions
+   ```
+
+   Il corpo accetta sia la chiave `actions` (obbligatoria) sia un oggetto `parameters` opzionale che
+   verrà fuso con i parametri esistenti. In assenza di `parameters` l'endpoint mantiene quelli già
+   salvati nel database.
 
 Puoi combinare più azioni generando differenti step e assemblarli in un'unica struttura JSON da
 salvare nel campo `parameters` della configurazione.
