@@ -92,6 +92,9 @@ async def execute_scraping(
 
     recipe = _resolve_recipe(target)
     parameters = _parse_parameters(target.parameters)
+    password = target.resolve_password()
+    if password and "password" not in parameters:
+        parameters["password"] = password
 
     logger.info(
         "Starting scraping for user %s on %s (%s) using recipe %s",

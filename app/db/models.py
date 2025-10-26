@@ -7,7 +7,7 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, T
 from sqlalchemy import UniqueConstraint
 from sqlalchemy.orm import relationship
 
-from app.core.security import normalize_scopes, scopes_to_string
+from app.core.security import decrypt_str, encrypt_str, normalize_scopes, scopes_to_string
 from app.db.base import Base
 
 
@@ -84,6 +84,7 @@ class ScrapingTarget(Base):
     recipe = Column(String(100), nullable=False, default="default")
     parameters = Column(Text, nullable=False, default="{}")
     notes = Column(Text, nullable=False, default="")
+    password_encrypted = Column(Text, nullable=True, default=None)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
@@ -103,6 +104,23 @@ class ScrapingTarget(Base):
                 url=self.url,
             )
         )
+
+    def set_password(self, password: str | None) -> None:
+        """Store ``password`` encrypting it with the Fernet key."""
+
+        if password:
+            self.password_encrypted = encrypt_str(password)
+        else:
+            self.password_encrypted = None
+
+    def resolve_password(self) -> str | None:
+        """Return the decrypted password for this target or its owner."""
+
+        if self.password_encrypted:
+            return decrypt_str(self.password_encrypted)
+        if self.user and self.user.password_encrypted:
+            return decrypt_str(self.user.password_encrypted)
+        return None
 
 
 __all__ = ["User", "ClientApp", "ScrapingTarget"]
