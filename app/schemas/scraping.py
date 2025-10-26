@@ -41,4 +41,31 @@ class ScrapingTargetOut(BaseModel):
     has_password: bool
 
 
-__all__ = ["ScrapingTargetCreate", "ScrapingTargetOut"]
+class ScrapingActionStep(BaseModel):
+    """Structure describing a single scraping step to be persisted."""
+
+    model_config = ConfigDict(extra="allow")
+
+    action: str = Field(..., min_length=1)
+
+
+class ScrapingActionsUpdate(BaseModel):
+    """Payload used to update the actions associated with a scraping target."""
+
+    actions: list[ScrapingActionStep]
+    parameters: Optional[dict[str, Any]] = None
+
+    @field_validator("actions")
+    @classmethod
+    def _ensure_actions(cls, value: list[ScrapingActionStep]) -> list[ScrapingActionStep]:
+        if not value:
+            raise ValueError("actions must contain at least one entry")
+        return value
+
+
+__all__ = [
+    "ScrapingActionStep",
+    "ScrapingActionsUpdate",
+    "ScrapingTargetCreate",
+    "ScrapingTargetOut",
+]
