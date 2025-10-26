@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -82,6 +84,85 @@ def test_admin_can_create_scraping_target(
     assert target.password_encrypted is not None
     assert target.password_encrypted != payload["password"]
     assert security.decrypt_str(target.password_encrypted) == payload["password"]
+
+
+def test_admin_can_update_scraping_actions(
+    api_client: TestClient, db_session: Session
+) -> None:
+    admin_password = "Adm1nPass!"
+    admin = _create_user(
+        db_session=db_session,
+        email="admin2@example.com",
+        password=admin_password,
+        is_admin=True,
+    )
+
+    target = models.ScrapingTarget(
+        user_id=admin.id,
+        site_name="update-site",
+        url="https://example.com/login",
+        recipe="default",
+        parameters=json.dumps({"actions": [{"action": "wait", "milliseconds": 500}]}),
+        notes="",
+    )
+    db_session.add(target)
+    db_session.commit()
+
+    headers = _auth_headers(api_client, email=admin.email, password=admin_password)
+
+    payload = {
+        "actions": [
+            {"action": "click", "selector": "#login"},
+            {"action": "fill", "selector": "input[name=email]", "value": "demo"},
+        ],
+        "parameters": {"settle_ms": 250},
+    }
+
+    response = api_client.put(
+        f"/scraping-targets/{target.id}/actions",
+        json=payload,
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["parameters"]["settle_ms"] == 250
+    assert data["parameters"]["actions"] == [
+        {"action": "click", "selector": "#login"},
+        {"action": "fill", "selector": "input[name=email]", "value": "demo"},
+    ]
+
+    db_session.refresh(target)
+    stored = json.loads(target.parameters)
+    assert stored["settle_ms"] == 250
+    assert stored["actions"][0]["selector"] == "#login"
+
+
+def test_update_scraping_actions_missing_target_returns_404(
+    api_client: TestClient, db_session: Session
+) -> None:
+    admin_password = "Adm1nPass!"
+    admin = _create_user(
+        db_session=db_session,
+        email="missing@example.com",
+        password=admin_password,
+        is_admin=True,
+    )
+
+    headers = _auth_headers(api_client, email=admin.email, password=admin_password)
+
+    payload = {
+        "actions": [{"action": "wait", "milliseconds": 500}],
+    }
+
+    response = api_client.put(
+        "/scraping-targets/999/actions",
+        json=payload,
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Scraping target not found"
 
 
 def test_scraping_target_resolves_user_password(db_session: Session) -> None:

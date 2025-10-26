@@ -303,8 +303,67 @@ def _coerce_action_step(raw_step: Mapping[str, Any] | ActionStep) -> tuple[str, 
     return name, params
 
 
+def _infer_credential_key(params: Mapping[str, Any]) -> str | None:
+    """Guess whether ``params`` reference the email or password field."""
+
+    explicit = str(params.get("use") or params.get("credential") or "").strip().lower()
+    if explicit in {"email", "username"}:
+        return "email"
+    if explicit in {"password", "passcode", "pwd"}:
+        return "password"
+
+    selector = str(params.get("selector") or "").lower()
+    field_name = str(params.get("field") or params.get("name") or "").lower()
+
+    haystack = " ".join(part for part in (selector, field_name) if part)
+
+    password_tokens = ("password", "passwd", "passcode", "pwd")
+    if any(token in haystack for token in password_tokens):
+        return "password"
+
+    email_tokens = ("email", "username", "user", "login")
+    if any(token in haystack for token in email_tokens):
+        return "email"
+
+    return None
+
+
+def _hydrate_action_parameters(
+    name: str,
+    params: dict[str, Any],
+    context: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Ensure missing credential values are populated from ``context``."""
+
+    if name != "fill":
+        return params
+
+    value = params.get("value")
+    text = params.get("text")
+    if value not in (None, "") or text not in (None, ""):
+        return params
+
+    credential_key = _infer_credential_key(params)
+    if not credential_key:
+        return params
+
+    credential_value = context.get(credential_key)
+    if credential_value is None:
+        return params
+
+    enriched = dict(params)
+    enriched.setdefault("value", credential_value)
+    if not enriched.get("text"):
+        enriched["text"] = credential_value
+    return enriched
+
+
 async def execute_actions(
-    page: Page, actions: Iterable[Mapping[str, Any] | ActionStep], result: ScrapingResult
+    page: Page,
+    actions: Iterable[Mapping[str, Any] | ActionStep],
+    result: ScrapingResult,
+    *,
+    context: Mapping[str, Any] | None = None,
 ) -> None:
     """Execute ``actions`` sequentially, mutating ``result`` in-place."""
 
@@ -323,6 +382,8 @@ async def execute_actions(
             raise KeyError(
                 f"Unknown scraping action: {name}. Available actions: {', '.join(sorted(SCRAPING_ACTIONS))}"
             ) from exc
+
+        params = _hydrate_action_parameters(name, params, context or {})
 
         missing = [field for field in definition["required_fields"] if field not in params]
         if missing:
@@ -355,7 +416,7 @@ async def default_recipe(page: Page, parameters: dict[str, Any]) -> ScrapingResu
             raise TypeError(
                 "The 'actions' parameter must be a mapping or a list/tuple of mappings"
             )
-        await execute_actions(page, actions, result)
+        await execute_actions(page, actions, result, context=parameters)
 
     return result
 

@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core import security
 from app.core.browser import _launch_browser, _shutdown_browser
 from app.db.models import ScrapingTarget, User
 from app.scraping.recipes import RECIPES, ScrapingRecipe
@@ -63,11 +64,39 @@ def _parse_parameters(raw: str | Mapping[str, Any] | None) -> dict[str, Any]:
         raise ScrapingConfigurationError("Invalid JSON parameters: %s" % raw) from exc
 
 
+def _inject_default_credentials(
+    parameters: dict[str, Any],
+    *,
+    target: ScrapingTarget,
+    runner: User | None,
+) -> dict[str, Any]:
+    """Return a copy of ``parameters`` with runner credentials populated."""
+
+    enriched = dict(parameters)
+
+    runner_user = runner or target.user
+
+    if runner_user and runner_user.email and "email" not in enriched:
+        enriched["email"] = runner_user.email
+
+    password: str | None
+    if runner_user and runner_user.password_encrypted:
+        password = security.decrypt_str(runner_user.password_encrypted)
+    else:
+        password = target.resolve_password()
+
+    if password and "password" not in enriched:
+        enriched["password"] = password
+
+    return enriched
+
+
 async def execute_scraping(
     target: ScrapingTarget,
     *,
     invoked_by: str | None = None,
     headless: bool = True,
+    runner: User | None = None,
 ) -> dict[str, Any]:
     """Execute a scraping job defined by ``target``.
 
@@ -88,13 +117,15 @@ async def execute_scraping(
     else:
         owner_label = f"user-{target.user_id}"
 
-    runner_label = (invoked_by or "").strip() or owner_label
+    runner_user = runner or target.user
+    runner_label = (invoked_by or "").strip() or (
+        runner_user.email if runner_user and runner_user.email else owner_label
+    )
 
     recipe = _resolve_recipe(target)
-    parameters = _parse_parameters(target.parameters)
-    password = target.resolve_password()
-    if password and "password" not in parameters:
-        parameters["password"] = password
+    parameters = _inject_default_credentials(
+        _parse_parameters(target.parameters), target=target, runner=runner
+    )
 
     logger.info(
         "Starting scraping for user %s on %s (%s) using recipe %s",
@@ -145,8 +176,18 @@ def run_scraping_job(
     """Synchronously execute a scraping job using the current event loop."""
 
     target = load_target(session, user_id=user_id, site_name=site_name)
+    runner: User | None = None
+    if invoked_by:
+        stmt = select(User).where(User.email == invoked_by)
+        runner = session.execute(stmt).scalars().first()
+
     return asyncio.run(
-        execute_scraping(target, invoked_by=invoked_by, headless=headless)
+        execute_scraping(
+            target,
+            invoked_by=invoked_by,
+            headless=headless,
+            runner=runner,
+        )
     )
 
 

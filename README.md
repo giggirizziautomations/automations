@@ -167,6 +167,66 @@ Le ricette predefinite (`default`, `save_screenshot`) eseguono nell'ordine le az
 puoi aggiungere nuove ricette o personalizzare quelle esistenti aggiornando il campo `recipe` del
 relativo record nel database.
 
+### Generazione guidata delle azioni
+
+Se desideri generare automaticamente la struttura JSON partendo dal codice HTML dell'elemento da
+interagire, puoi utilizzare i nuovi helper disponibili in `app.scraping.helpers`:
+
+```python
+from app.scraping.helpers import build_action_step, build_actions_document
+
+html = '<button id="submit-login" class="btn">Login</button>'
+
+# Restituisce un singolo dizionario {"action": ..., "selector": ...}
+action = build_action_step(html, "click")
+
+# Produce un documento completo pronto per essere serializzato e salvato nei parameters
+parameters = build_actions_document(html, "click", settle_ms=500)
+```
+
+Il generatore analizza il primo elemento presente nello snippet e costruisce un selettore CSS stabile
+utilizzando `id`, `class`, attributi `name` o `data-*`. Le azioni riconosciute includono:
+
+- `wait`: crea automaticamente un'azione `wait_for_element` se è possibile dedurre un selettore,
+  altrimenti ripiega su un semplice `wait` di 1000ms;
+- `click`: produce un'azione `click` con il selettore più specifico disponibile;
+- `input text` (oltre ai sinonimi `fill`, `type`): crea un'azione `fill` valorizzando `value` con il
+  campo esplicito passato alla funzione oppure con `placeholder`/`value`/`aria-label` trovati
+  nell'HTML.
+
+Puoi combinare più azioni generando differenti step e assemblarli in un'unica struttura JSON da
+salvare nel campo `parameters` della configurazione.
+
+### Aggiornamento via API delle azioni di scraping
+
+Oltre al classico `POST /scraping-targets`, l'API espone ora un endpoint dedicato alla gestione del
+JSON delle azioni associate a un target esistente:
+
+```http
+PUT /scraping-targets/{id}/actions
+Authorization: Bearer <token admin>
+Content-Type: application/json
+
+{
+  "actions": [
+    {"action": "click", "selector": "#submit-login"},
+    {"action": "fill", "selector": "input[name=email]", "value": "demo@example.com"}
+  ],
+  "parameters": {
+    "settle_ms": 750
+  }
+}
+```
+
+Il corpo della richiesta accetta una lista di step (con la chiave obbligatoria `action`) e un oggetto
+`parameters` opzionale usato per unire ulteriori impostazioni (ad esempio `settle_ms`). L'array di
+azioni viene sostituito integralmente nel record e la risposta restituisce la rappresentazione
+aggiornata del target, così da avere conferma immediata delle modifiche applicate.
+
+Quando uno step `fill` non specifica esplicitamente il testo da inserire, l'esecuzione prova a
+ricavare email e password dal database: il sistema usa le credenziali dell'utente che ha avviato
+lo scraping (se presenti), altrimenti ricade su quelle associate al target.
+
 > ℹ️ **Nuova istruzione:** per i client `client_credentials` fornisci sempre un `client_id` esplicito.
 > Il comando mostrerà il `client_secret` una sola volta: salvalo in modo sicuro perché
 > non potrà essere recuperato dal database in chiaro.

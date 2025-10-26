@@ -9,10 +9,27 @@ from sqlalchemy.orm import Session
 from app.core.auth import Principal, require_admin
 from app.db import models
 from app.db.base import get_db
-from app.schemas.scraping import ScrapingTargetCreate, ScrapingTargetOut
+from app.schemas.scraping import (
+    ScrapingActionsUpdate,
+    ScrapingTargetCreate,
+    ScrapingTargetOut,
+)
 
 
 router = APIRouter(prefix="/scraping-targets", tags=["scraping"])
+
+
+def _serialize_target(target: models.ScrapingTarget) -> ScrapingTargetOut:
+    return ScrapingTargetOut(
+        id=target.id,
+        user_id=target.user_id,
+        site_name=target.site_name,
+        url=target.url,
+        recipe=target.recipe,
+        parameters=json.loads(target.parameters or "{}"),
+        notes=target.notes,
+        has_password=bool(target.password_encrypted),
+    )
 
 
 @router.post("", response_model=ScrapingTargetOut, status_code=status.HTTP_201_CREATED)
@@ -54,16 +71,43 @@ async def create_scraping_target(
     db.commit()
     db.refresh(target)
 
-    return ScrapingTargetOut(
-        id=target.id,
-        user_id=target.user_id,
-        site_name=target.site_name,
-        url=target.url,
-        recipe=target.recipe,
-        parameters=json.loads(target.parameters or "{}"),
-        notes=target.notes,
-        has_password=bool(target.password_encrypted),
+    return _serialize_target(target)
+
+
+@router.put("/{target_id}/actions", response_model=ScrapingTargetOut)
+async def update_scraping_target_actions(
+    target_id: int,
+    payload: ScrapingActionsUpdate,
+    db: Session = Depends(get_db),
+    _: Principal = Depends(require_admin),
+) -> ScrapingTargetOut:
+    """Replace the JSON actions document stored for ``target_id``."""
+
+    target = (
+        db.query(models.ScrapingTarget)
+        .filter(models.ScrapingTarget.id == target_id)
+        .first()
     )
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scraping target not found",
+        )
+
+    current_parameters = json.loads(target.parameters or "{}")
+    if payload.parameters:
+        current_parameters.update(payload.parameters)
+
+    current_parameters["actions"] = [
+        step.model_dump(exclude_none=True) for step in payload.actions
+    ]
+
+    target.parameters = json.dumps(current_parameters)
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    return _serialize_target(target)
 
 
 __all__ = ["router"]
