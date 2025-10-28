@@ -1,10 +1,12 @@
 """Endpoints supporting the scraping instruction workflow."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from typing import Annotated
 
 from app.core.auth import get_current_user
+from app.core.json_utils import relaxed_json_loads
 from app.core.scraping import generate_scraping_action
 from app.core.security import decrypt_str, encrypt_str
 from app.db import models
@@ -19,8 +21,6 @@ from app.schemas.scraping import (
 
 
 router = APIRouter(prefix="/scraping", tags=["scraping"])
-
-
 def _serialise_routine(routine: models.ScrapingRoutine) -> ScrapingRoutineResponse:
     actions = [ScrapingAction(**item) for item in routine.get_actions()]
     password_plain = decrypt_str(routine.password_encrypted)
@@ -51,6 +51,10 @@ def _get_owned_routine(
     if not routine:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Routine not found")
     return routine
+
+
+PreviewPayload = Annotated[ScrapingActionPreviewRequest, Body(json_loads=relaxed_json_loads)]
+MutationPayload = Annotated[ScrapingActionMutationRequest, Body(json_loads=relaxed_json_loads)]
 
 
 def _generate_action(payload: ScrapingActionPreviewRequest) -> ScrapingAction:
@@ -95,7 +99,7 @@ def create_scraping_routine(
     response_model=ScrapingAction,
 )
 def preview_scraping_action(
-    payload: ScrapingActionPreviewRequest,
+    payload: PreviewPayload,
     user: models.User = Depends(get_current_user),
 ) -> ScrapingAction:
     """Return the structured representation of the requested action."""
@@ -109,7 +113,7 @@ def preview_scraping_action(
 )
 def append_scraping_action(
     routine_id: int,
-    payload: ScrapingActionMutationRequest,
+    payload: MutationPayload,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ScrapingRoutineResponse:
@@ -139,7 +143,7 @@ def append_scraping_action(
 def patch_scraping_action(
     routine_id: int,
     action_index: int,
-    payload: ScrapingActionMutationRequest,
+    payload: MutationPayload,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ScrapingRoutineResponse:

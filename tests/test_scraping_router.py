@@ -102,6 +102,32 @@ def test_preview_generates_structured_action(
     assert data["metadata"]["raw_instruction"] == "Click the login button"
 
 
+def test_preview_accepts_html_with_double_quotes(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    password = "secret123"
+    user = _create_user(db_session=db_session, password=password)
+    headers = _auth_headers(api_client, email=user.email, password=password)
+
+    response = api_client.post(
+        "/scraping/actions/preview",
+        json={
+            "instruction": "wait for the element to appear",
+            "html_snippet": '<div data-bind="text: session.tileDisplayName">content</div>',
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "wait"
+    assert data["selector"] in {
+        "[data-bind=\"text: session.tileDisplayName\"]",
+        "[data-bind='text: session.tileDisplayName']",
+    }
+
+
 def test_append_and_patch_actions(
     api_client: TestClient,
     db_session: Session,
