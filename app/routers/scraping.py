@@ -2,18 +2,24 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 
 from app.core.auth import Principal, require_admin
 from app.db import models
 from app.db.base import get_db
 from app.schemas.scraping import (
+    ScrapingActionDocument,
     ScrapingActionsUpdate,
+    ScrapingActionSuggestion,
     ScrapingTargetCreate,
     ScrapingTargetOut,
 )
+from app.scraping.helpers import build_action_step, build_actions_document
+from pydantic import ValidationError
 
 
 router = APIRouter(prefix="/scraping-targets", tags=["scraping"])
@@ -101,6 +107,133 @@ async def update_scraping_target_actions(
     current_parameters["actions"] = [
         step.model_dump(exclude_none=True) for step in payload.actions
     ]
+
+    target.parameters = json.dumps(current_parameters)
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    return _serialize_target(target)
+
+
+async def _load_action_suggestion(request: Request) -> ScrapingActionSuggestion:
+    """Parse a request body into a :class:`ScrapingActionSuggestion`."""
+
+    content_type = request.headers.get("content-type", "")
+    segments = [segment.strip() for segment in content_type.split(";") if segment.strip()]
+    media_type = segments[0].lower() if segments else ""
+    params: dict[str, str] = {}
+    for segment in segments[1:]:
+        if "=" in segment:
+            key, value = segment.split("=", 1)
+            params[key.strip().lower()] = value.strip()
+    charset = params.get("charset", "utf-8")
+
+    if media_type == "application/x-www-form-urlencoded":
+        body_bytes = await request.body()
+        try:
+            decoded = body_bytes.decode(charset)
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Form payload must be UTF-8 encoded.",
+            ) from exc
+
+        parsed = parse_qs(decoded, keep_blank_values=True)
+        data = {key: values[-1] for key, values in parsed.items() if values}
+    elif media_type == "multipart/form-data":
+        try:
+            form = await request.form()
+        except AssertionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=(
+                    "Install python-multipart to submit multipart form data or send "
+                    "application/x-www-form-urlencoded payloads instead."
+                ),
+            ) from exc
+        data = {key: value for key, value in form.items()}
+    else:
+        # Default to JSON, allowing ``application/json`` and ``*/*+json`` payloads.
+        try:
+            data = await request.json()
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Invalid JSON payload. Escape embedded double quotes in the HTML "
+                    "snippet (for example data-bind=\\\"...\\\") or submit the payload "
+                    "as form data."
+                ),
+            ) from exc
+
+    if isinstance(data.get("settle_ms"), str) and data["settle_ms"].strip() == "":
+        data["settle_ms"] = None
+
+    try:
+        return ScrapingActionSuggestion.model_validate(data)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+
+
+@router.post("/actions/preview", response_model=ScrapingActionDocument)
+async def preview_scraping_action(
+    request: Request,
+    _: Principal = Depends(require_admin),
+) -> ScrapingActionDocument:
+    """Render a scraping action document from the provided HTML snippet."""
+
+    payload = await _load_action_suggestion(request)
+    document = build_actions_document(
+        payload.html,
+        payload.suggestion,
+        value=payload.value,
+        settle_ms=payload.settle_ms,
+    )
+    return ScrapingActionDocument(**document)
+
+
+@router.post("/{target_id}/actions/from-html", response_model=ScrapingTargetOut)
+async def append_scraping_action_from_html(
+    target_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: Principal = Depends(require_admin),
+) -> ScrapingTargetOut:
+    """Append a generated scraping action to the stored configuration."""
+
+    payload = await _load_action_suggestion(request)
+    target = (
+        db.query(models.ScrapingTarget)
+        .filter(models.ScrapingTarget.id == target_id)
+        .first()
+    )
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scraping target not found",
+        )
+
+    current_parameters = json.loads(target.parameters or "{}")
+    actions: list[dict[str, object]] = []
+    existing_actions = current_parameters.get("actions")
+    if isinstance(existing_actions, list):
+        actions.extend(
+            step
+            for step in existing_actions
+            if isinstance(step, dict)
+        )
+
+    new_action = build_action_step(
+        payload.html,
+        payload.suggestion,
+        value=payload.value,
+    )
+    actions.append(new_action)
+    current_parameters["actions"] = actions
+
+    if payload.settle_ms is not None:
+        current_parameters["settle_ms"] = payload.settle_ms
 
     target.parameters = json.dumps(current_parameters)
     db.add(target)

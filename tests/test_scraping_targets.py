@@ -165,6 +165,107 @@ def test_update_scraping_actions_missing_target_returns_404(
     assert response.json()["detail"] == "Scraping target not found"
 
 
+def test_preview_scraping_action_allows_form_payload(
+    api_client: TestClient, db_session: Session
+) -> None:
+    admin_password = "Adm1nPass!"
+    admin = _create_user(
+        db_session=db_session,
+        email="form-admin@example.com",
+        password=admin_password,
+        is_admin=True,
+    )
+
+    headers = _auth_headers(api_client, email=admin.email, password=admin_password)
+
+    response = api_client.post(
+        "/scraping-targets/actions/preview",
+        data={
+            "html": '<div data-bind="text: session.tileDisplayName">demo</div>',
+            "suggestion": "click",
+            "value": "ignored",
+            "settle_ms": "0",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actions"] == [
+        {"action": "click", "selector": "div"},
+    ]
+    assert payload["settle_ms"] == 0
+
+
+def test_preview_scraping_action_invalid_json_returns_hint(
+    api_client: TestClient, db_session: Session
+) -> None:
+    admin_password = "Adm1nPass!"
+    admin = _create_user(
+        db_session=db_session,
+        email="json-admin@example.com",
+        password=admin_password,
+        is_admin=True,
+    )
+
+    headers = _auth_headers(api_client, email=admin.email, password=admin_password)
+
+    raw_payload = (
+        '{"html": "<div data-bind="text: session.tileDisplayName">demo</div>", '
+        '"suggestion": "click"}'
+    )
+
+    response = api_client.post(
+        "/scraping-targets/actions/preview",
+        data=raw_payload,
+        headers={**headers, "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "Escape embedded double quotes" in detail
+
+
+def test_append_scraping_action_from_html_accepts_form_payload(
+    api_client: TestClient, db_session: Session
+) -> None:
+    admin_password = "Adm1nPass!"
+    admin = _create_user(
+        db_session=db_session,
+        email="append-admin@example.com",
+        password=admin_password,
+        is_admin=True,
+    )
+
+    target = models.ScrapingTarget(
+        user_id=admin.id,
+        site_name="form-target",
+        url="https://example.com/login",
+        recipe="default",
+        parameters=json.dumps({"actions": []}),
+        notes="",
+    )
+    db_session.add(target)
+    db_session.commit()
+
+    headers = _auth_headers(api_client, email=admin.email, password=admin_password)
+
+    response = api_client.post(
+        f"/scraping-targets/{target.id}/actions/from-html",
+        data={
+            "html": '<button id="submit-login" data-bind="click: login">Login</button>',
+            "suggestion": "click",
+            "settle_ms": "750",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["parameters"]["actions"][-1]["selector"] == "#submit-login"
+    assert body["parameters"]["settle_ms"] == 750
+
+
 def test_scraping_target_resolves_user_password(db_session: Session) -> None:
     password = "plain-pass"
     user = _create_user(
