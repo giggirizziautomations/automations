@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ScrapingTargetCreate(BaseModel):
@@ -63,13 +63,22 @@ class ScrapingActionsUpdate(BaseModel):
         return value
 
 
-class ScrapingActionSuggestion(BaseModel):
+class ScrapingActionPayload(BaseModel):
     """Payload describing an HTML snippet to convert into a scraping action."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     html: str = Field(..., min_length=1)
-    suggestion: str = Field(..., min_length=1)
+    action: str = Field(..., min_length=1, alias="suggestion")
     value: Optional[str] = None
     settle_ms: Optional[int] = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _support_legacy_suggestion_key(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "action" not in value and "suggestion" in value:
+            value = {**value, "action": value["suggestion"]}
+        return value
 
 
 class ScrapingActionDocument(BaseModel):
@@ -83,7 +92,7 @@ __all__ = [
     "ScrapingActionStep",
     "ScrapingActionsUpdate",
     "ScrapingActionDocument",
-    "ScrapingActionSuggestion",
+    "ScrapingActionPayload",
     "ScrapingTargetCreate",
     "ScrapingTargetOut",
 ]

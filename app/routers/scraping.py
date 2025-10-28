@@ -6,6 +6,8 @@ from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+
 from sqlalchemy.orm import Session
 
 from app.core.auth import Principal, require_admin
@@ -13,8 +15,8 @@ from app.db import models
 from app.db.base import get_db
 from app.schemas.scraping import (
     ScrapingActionDocument,
+    ScrapingActionPayload,
     ScrapingActionsUpdate,
-    ScrapingActionSuggestion,
     ScrapingTargetCreate,
     ScrapingTargetOut,
 )
@@ -115,16 +117,76 @@ async def update_scraping_target_actions(
     return _serialize_target(target)
 
 
+def _coerce_qs_values(data: dict[str, list[str]]) -> dict[str, object]:
+    coerced: dict[str, object] = {}
+    for key, values in data.items():
+        if not values:
+            continue
+        if len(values) == 1:
+            coerced[key] = values[0]
+        else:
+            coerced[key] = values
+    return coerced
+
+
+def _repair_html_quotes(raw_body: str) -> str:
+    """Escape unencoded quotes inside the ``html`` attribute if present."""
+
+    import re
+
+    pattern = re.compile(r'("html"\s*:\s*")(?P<html>.*?)(?<!\\)"(?=\s*(,|}))', re.DOTALL)
+
+    def _replacer(match: re.Match[str]) -> str:
+        escaped = match.group("html").replace("\\", "\\\\").replace('"', '\\"')
+        return f'{match.group(1)}{escaped}"'
+
+    return pattern.sub(_replacer, raw_body, count=1)
+
+
+async def _parse_action_payload(request: Request) -> ScrapingActionPayload:
+    raw_bytes = await request.body()
+    if not raw_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Request body is required",
+        )
+    body_text = raw_bytes.decode("utf-8", errors="ignore")
+
+    data: dict[str, object] | None = None
+
+    try:
+        data = json.loads(body_text)
+    except json.JSONDecodeError:
+        try:
+            repaired = _repair_html_quotes(body_text)
+            data = json.loads(repaired)
+        except json.JSONDecodeError:
+            parsed_qs = parse_qs(body_text)
+            if parsed_qs:
+                data = _coerce_qs_values(parsed_qs)
+
+    if data is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid request payload; expected JSON object",
+        )
+
+    try:
+        return ScrapingActionPayload.model_validate(data)
+    except ValidationError as exc:
+        raise RequestValidationError(errors=exc.errors()) from exc
+
+
 @router.post("/actions/preview", response_model=ScrapingActionDocument)
 async def preview_scraping_action(
-    payload: ScrapingActionSuggestion,
+    payload: ScrapingActionPayload = Depends(_parse_action_payload),
     _: Principal = Depends(require_admin),
 ) -> ScrapingActionDocument:
     """Render a scraping action document from the provided HTML snippet."""
 
     document = build_actions_document(
         payload.html,
-        payload.suggestion,
+        payload.action,
         value=payload.value,
         settle_ms=payload.settle_ms,
     )
@@ -134,7 +196,7 @@ async def preview_scraping_action(
 @router.post("/{target_id}/actions/from-html", response_model=ScrapingTargetOut)
 async def append_scraping_action_from_html(
     target_id: int,
-    payload: ScrapingActionSuggestion,
+    payload: ScrapingActionPayload = Depends(_parse_action_payload),
     db: Session = Depends(get_db),
     _: Principal = Depends(require_admin),
 ) -> ScrapingTargetOut:
@@ -161,11 +223,7 @@ async def append_scraping_action_from_html(
             if isinstance(step, dict)
         )
 
-    new_action = build_action_step(
-        payload.html,
-        payload.suggestion,
-        value=payload.value,
-    )
+    new_action = build_action_step(payload.html, payload.action, value=payload.value)
     actions.append(new_action)
     current_parameters["actions"] = actions
 

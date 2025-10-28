@@ -182,7 +182,7 @@ def test_preview_scraping_action_allows_form_payload(
         "/scraping-targets/actions/preview",
         data={
             "html": '<div data-bind="text: session.tileDisplayName">demo</div>',
-            "suggestion": "click",
+            "action": "click",
             "value": "ignored",
             "settle_ms": "0",
         },
@@ -197,7 +197,7 @@ def test_preview_scraping_action_allows_form_payload(
     assert payload["settle_ms"] == 0
 
 
-def test_preview_scraping_action_invalid_json_returns_hint(
+def test_preview_scraping_action_repairs_unescaped_quotes(
     api_client: TestClient, db_session: Session
 ) -> None:
     admin_password = "Adm1nPass!"
@@ -212,7 +212,7 @@ def test_preview_scraping_action_invalid_json_returns_hint(
 
     raw_payload = (
         '{"html": "<div data-bind="text: session.tileDisplayName">demo</div>", '
-        '"suggestion": "click"}'
+        '"action": "click"}'
     )
 
     response = api_client.post(
@@ -221,9 +221,37 @@ def test_preview_scraping_action_invalid_json_returns_hint(
         headers={**headers, "Content-Type": "application/json"},
     )
 
-    assert response.status_code == 422
-    detail = response.json()["detail"]
-    assert "Escape embedded double quotes" in detail
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actions"][0]["action"] == "click"
+    assert payload["actions"][0]["selector"] == "div"
+
+
+def test_preview_scraping_action_accepts_legacy_suggestion_field(
+    api_client: TestClient, db_session: Session
+) -> None:
+    admin_password = "Adm1nPass!"
+    admin = _create_user(
+        db_session=db_session,
+        email="legacy-admin@example.com",
+        password=admin_password,
+        is_admin=True,
+    )
+
+    headers = _auth_headers(api_client, email=admin.email, password=admin_password)
+
+    response = api_client.post(
+        "/scraping-targets/actions/preview",
+        json={
+            "html": "<div class=\"cta\">cta</div>",
+            "suggestion": "click",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actions"][0] == {"action": "click", "selector": "div.cta"}
 
 
 def test_append_scraping_action_from_html_accepts_form_payload(
@@ -254,7 +282,7 @@ def test_append_scraping_action_from_html_accepts_form_payload(
         f"/scraping-targets/{target.id}/actions/from-html",
         data={
             "html": '<button id="submit-login" data-bind="click: login">Login</button>',
-            "suggestion": "click",
+            "action": "click",
             "settle_ms": "750",
         },
         headers=headers,

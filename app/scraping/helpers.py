@@ -72,7 +72,7 @@ def _build_selector(element: _ElementDescription) -> str:
     return tag
 
 
-def _normalise_suggestion(value: str) -> str:
+def _normalise_action(value: str) -> str:
     return value.strip().lower()
 
 
@@ -88,17 +88,17 @@ def _resolve_fill_value(attributes: dict[str, str], explicit: str | None) -> str
 
 def build_action_step(
     html_snippet: str,
-    suggestion: str,
+    action_hint: str,
     *,
     value: str | None = None,
 ) -> ActionStep:
-    """Return a single scraping action inferred from ``html_snippet`` and ``suggestion``.
+    """Return a single scraping action inferred from ``html_snippet`` and ``action_hint``.
 
     Parameters
     ----------
     html_snippet:
         Raw HTML describing the element the automation should target.
-    suggestion:
+    action_hint:
         High-level instruction such as ``"wait"``, ``"click"`` or ``"input text"``.
     value:
         Optional text to use when the action requires a value (for example when
@@ -109,21 +109,21 @@ def build_action_step(
     parser.feed(html_snippet)
     element = parser.description
 
-    suggestion_key = _normalise_suggestion(suggestion)
+    action_key = _normalise_action(action_hint)
     selector = _build_selector(element)
     attributes = element.attributes or {}
 
-    if suggestion_key in {"wait", "wait for element", "wait for selector"}:
+    if action_key in {"wait", "wait for element", "wait for selector"}:
         if element.has_data:
             return {"action": "wait_for_element", "selector": selector, "state": "visible"}
         return {"action": "wait", "milliseconds": 1000}
 
-    if suggestion_key in {"click", "press", "tap"}:
+    if action_key in {"click", "press", "tap"}:
         if not element.has_data:
             raise ValueError("Cannot infer a selector for the requested click action")
         return {"action": "click", "selector": selector}
 
-    if suggestion_key in {"input", "input text", "fill", "type", "type text"}:
+    if action_key in {"input", "input text", "fill", "type", "type text"}:
         if not element.has_data:
             raise ValueError("Cannot infer a selector for the requested input action")
         fill_value = _resolve_fill_value(attributes, value)
@@ -132,19 +132,19 @@ def build_action_step(
             action["value"] = fill_value
         return action
 
-    raise ValueError(f"Unsupported suggestion: {suggestion}")
+    raise ValueError(f"Unsupported action: {action_hint}")
 
 
 def build_actions_document(
     html_snippet: str,
-    suggestion: str,
+    action_hint: str,
     *,
     value: str | None = None,
     settle_ms: int | None = None,
 ) -> dict[str, Any]:
     """Return a JSON-serialisable document ready to be stored as parameters."""
 
-    action = build_action_step(html_snippet, suggestion, value=value)
+    action = build_action_step(html_snippet, action_hint, value=value)
     document: dict[str, Any] = {"actions": [action]}
     if settle_ms is not None:
         document["settle_ms"] = settle_ms

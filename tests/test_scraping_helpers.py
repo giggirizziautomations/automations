@@ -31,7 +31,7 @@ def test_build_actions_document_wraps_action() -> None:
     assert document["actions"][0]["selector"] == "div.alert.banner"
 
 
-def test_build_action_step_unknown_suggestion_raises() -> None:
+def test_build_action_step_unknown_action_raises() -> None:
     html = '<span class="label">Status</span>'
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Unsupported action"):
         build_action_step(html, "scroll")

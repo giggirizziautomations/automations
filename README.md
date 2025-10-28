@@ -213,7 +213,7 @@ interagire, puoi utilizzare i nuovi helper disponibili in `app.scraping.helpers`
        ("<button type='submit' class='btn primary'>Accedi</button>", "click"),
    ]
 
-   actions = [build_action_step(html, suggestion) for html, suggestion in snippets]
+   actions = [build_action_step(html, action) for html, action in snippets]
    document = {"settle_ms": 800, "actions": actions}
    ```
 
@@ -254,6 +254,25 @@ interagire, puoi utilizzare i nuovi helper disponibili in `app.scraping.helpers`
    Il corpo accetta sia la chiave `actions` (obbligatoria) sia un oggetto `parameters` opzionale che
    verrà fuso con i parametri esistenti. In assenza di `parameters` l'endpoint mantiene quelli già
    salvati nel database.
+
+5. **Anteprima rapida tramite API**. Gli endpoint `POST /scraping-targets/actions/preview` e
+   `POST /scraping-targets/{id}/actions/from-html` accettano ora il campo `action` al posto del
+   precedente `suggestion`. I client esistenti continuano a funzionare grazie all'alias automatico,
+   ma il nuovo nome rende esplicito che il valore deve indicare direttamente il tipo di azione da
+   generare (es. `click`, `wait`, `input text`). Entrambi gli endpoint normalizzano inoltre gli
+   snippet HTML che contengono doppi apici non escapati, così puoi inviare direttamente il codice
+   copiato dagli strumenti del browser senza doverlo manipolare manualmente. È sufficiente inviare
+   un corpo JSON o `application/x-www-form-urlencoded`, come nell'esempio:
+
+   ```bash
+   curl -X POST \
+     -H "Authorization: Bearer <token admin>" \
+     -H "Content-Type: application/json" \
+     -d '{"html": "<div data-bind="text: session.tileDisplayName">demo</div>", "action": "click"}' \
+     http://localhost:8000/scraping-targets/actions/preview
+   ```
+
+   L'API si occupa di escapare i caratteri necessari e restituirà il documento di azione completo.
 
 Puoi combinare più azioni generando differenti step e assemblarli in un'unica struttura JSON da
 salvare nel campo `parameters` della configurazione.
