@@ -10,10 +10,13 @@ from app.core.auth import Principal, require_admin
 from app.db import models
 from app.db.base import get_db
 from app.schemas.scraping import (
+    ScrapingActionDocument,
     ScrapingActionsUpdate,
+    ScrapingActionSuggestion,
     ScrapingTargetCreate,
     ScrapingTargetOut,
 )
+from app.scraping.helpers import build_action_step, build_actions_document
 
 
 router = APIRouter(prefix="/scraping-targets", tags=["scraping"])
@@ -101,6 +104,71 @@ async def update_scraping_target_actions(
     current_parameters["actions"] = [
         step.model_dump(exclude_none=True) for step in payload.actions
     ]
+
+    target.parameters = json.dumps(current_parameters)
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+
+    return _serialize_target(target)
+
+
+@router.post("/actions/preview", response_model=ScrapingActionDocument)
+async def preview_scraping_action(
+    payload: ScrapingActionSuggestion,
+    _: Principal = Depends(require_admin),
+) -> ScrapingActionDocument:
+    """Render a scraping action document from the provided HTML snippet."""
+
+    document = build_actions_document(
+        payload.html,
+        payload.suggestion,
+        value=payload.value,
+        settle_ms=payload.settle_ms,
+    )
+    return ScrapingActionDocument(**document)
+
+
+@router.post("/{target_id}/actions/from-html", response_model=ScrapingTargetOut)
+async def append_scraping_action_from_html(
+    target_id: int,
+    payload: ScrapingActionSuggestion,
+    db: Session = Depends(get_db),
+    _: Principal = Depends(require_admin),
+) -> ScrapingTargetOut:
+    """Append a generated scraping action to the stored configuration."""
+
+    target = (
+        db.query(models.ScrapingTarget)
+        .filter(models.ScrapingTarget.id == target_id)
+        .first()
+    )
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scraping target not found",
+        )
+
+    current_parameters = json.loads(target.parameters or "{}")
+    actions: list[dict[str, object]] = []
+    existing_actions = current_parameters.get("actions")
+    if isinstance(existing_actions, list):
+        actions.extend(
+            step
+            for step in existing_actions
+            if isinstance(step, dict)
+        )
+
+    new_action = build_action_step(
+        payload.html,
+        payload.suggestion,
+        value=payload.value,
+    )
+    actions.append(new_action)
+    current_parameters["actions"] = actions
+
+    if payload.settle_ms is not None:
+        current_parameters["settle_ms"] = payload.settle_ms
 
     target.parameters = json.dumps(current_parameters)
     db.add(target)
