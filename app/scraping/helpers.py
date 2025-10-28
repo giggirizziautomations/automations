@@ -42,6 +42,12 @@ class _ElementSniffer(HTMLParser):
         )
 
 
+def _escape_attr_value(value: str) -> str:
+    """Escape attribute values to keep selectors CSS-compatible."""
+
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _build_selector(element: _ElementDescription) -> str:
     """Return a CSS selector targeting ``element`` as precisely as possible."""
 
@@ -55,19 +61,30 @@ def _build_selector(element: _ElementDescription) -> str:
     if element_id:
         return f"#{element_id}"
 
-    class_names = attributes.get("class", "").split()
-    if class_names:
-        classes = "".join(f".{cls}" for cls in class_names if cls)
-        return f"{tag}{classes}"
+    class_names = [cls for cls in attributes.get("class", "").split() if cls]
+    selector = tag + "".join(f".{cls}" for cls in class_names)
 
-    for attr_name in ("name", "data-testid", "data-test", "data-qa", "aria-label"):
+    attribute_priority = (
+        "name",
+        "data-testid",
+        "data-test",
+        "data-qa",
+        "aria-label",
+        "data-bind",
+        "type",
+    )
+    attribute_selectors: list[str] = []
+    for attr_name in attribute_priority:
         attr_value = attributes.get(attr_name)
         if attr_value:
-            return f'{tag}[{attr_name}="{attr_value}"]'
+            escaped = _escape_attr_value(attr_value)
+            attribute_selectors.append(f'[{attr_name}="{escaped}"]')
 
-    type_attr = attributes.get("type")
-    if type_attr:
-        return f'{tag}[type="{type_attr}"]'
+    if attribute_selectors:
+        return selector + "".join(attribute_selectors)
+
+    if selector != tag:
+        return selector
 
     return tag
 

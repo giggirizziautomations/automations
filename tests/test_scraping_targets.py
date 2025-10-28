@@ -192,7 +192,10 @@ def test_preview_scraping_action_allows_form_payload(
     assert response.status_code == 200
     payload = response.json()
     assert payload["actions"] == [
-        {"action": "click", "selector": "div"},
+        {
+            "action": "click",
+            "selector": 'div[data-bind="text: session.tileDisplayName"]',
+        },
     ]
     assert payload["settle_ms"] == 0
 
@@ -224,7 +227,7 @@ def test_preview_scraping_action_repairs_unescaped_quotes(
     assert response.status_code == 200
     payload = response.json()
     assert payload["actions"][0]["action"] == "click"
-    assert payload["actions"][0]["selector"] == "div"
+    assert payload["actions"][0]["selector"] == 'div[data-bind="text: session.tileDisplayName"]'
 
 
 def test_preview_scraping_action_accepts_legacy_suggestion_field(
@@ -252,6 +255,37 @@ def test_preview_scraping_action_accepts_legacy_suggestion_field(
     assert response.status_code == 200
     payload = response.json()
     assert payload["actions"][0] == {"action": "click", "selector": "div.cta"}
+
+
+def test_preview_scraping_action_accepts_nested_payload(
+    api_client: TestClient, db_session: Session
+) -> None:
+    admin_password = "Adm1nPass!"
+    admin = _create_user(
+        db_session=db_session,
+        email="nested-admin@example.com",
+        password=admin_password,
+        is_admin=True,
+    )
+
+    headers = _auth_headers(api_client, email=admin.email, password=admin_password)
+
+    response = api_client.post(
+        "/scraping-targets/actions/preview",
+        json={
+            "payload": {
+                "html": "<button class=\"cta\">cta</button>",
+                "suggestion": "click",
+            },
+            "settle_ms": 250,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["actions"][0] == {"action": "click", "selector": "button.cta"}
+    assert payload["settle_ms"] == 250
 
 
 def test_append_scraping_action_from_html_accepts_form_payload(
@@ -292,6 +326,48 @@ def test_append_scraping_action_from_html_accepts_form_payload(
     body = response.json()
     assert body["parameters"]["actions"][-1]["selector"] == "#submit-login"
     assert body["parameters"]["settle_ms"] == 750
+
+
+def test_append_scraping_action_from_html_accepts_nested_payload(
+    api_client: TestClient, db_session: Session
+) -> None:
+    admin_password = "Adm1nPass!"
+    admin = _create_user(
+        db_session=db_session,
+        email="nested-append-admin@example.com",
+        password=admin_password,
+        is_admin=True,
+    )
+
+    target = models.ScrapingTarget(
+        user_id=admin.id,
+        site_name="nested-target",
+        url="https://example.com/login",
+        recipe="default",
+        parameters=json.dumps({"actions": []}),
+        notes="",
+    )
+    db_session.add(target)
+    db_session.commit()
+
+    headers = _auth_headers(api_client, email=admin.email, password=admin_password)
+
+    response = api_client.post(
+        f"/scraping-targets/{target.id}/actions/from-html",
+        json={
+            "payload": {
+                "html": '<button id="submit-login">Login</button>',
+                "action": "click",
+            },
+            "settle_ms": 1500,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["parameters"]["actions"][-1]["selector"] == "#submit-login"
+    assert body["parameters"]["settle_ms"] == 1500
 
 
 def test_scraping_target_resolves_user_password(db_session: Session) -> None:

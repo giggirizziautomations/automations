@@ -171,6 +171,32 @@ async def _parse_action_payload(request: Request) -> ScrapingActionPayload:
             detail="Invalid request payload; expected JSON object",
         )
 
+    if isinstance(data, dict) and "payload" in data:
+        raw_payload = data["payload"]
+        if isinstance(raw_payload, str):
+            try:
+                payload_data = json.loads(raw_payload)
+            except json.JSONDecodeError as exc:  # noqa: PERF203
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid payload; expected JSON object",
+                ) from exc
+        elif isinstance(raw_payload, dict):
+            payload_data = raw_payload
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid payload; expected JSON object",
+            )
+
+        recognised_keys = {"html", "action", "suggestion", "value", "settle_ms"}
+        overrides = {
+            key: value
+            for key, value in data.items()
+            if key in recognised_keys and key != "payload"
+        }
+        data = {**payload_data, **overrides}
+
     try:
         return ScrapingActionPayload.model_validate(data)
     except ValidationError as exc:
