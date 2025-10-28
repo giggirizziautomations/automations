@@ -56,10 +56,31 @@ class ScrapingActionMutationRequest(BaseModel):
     html_snippet: str = Field(..., min_length=1)
 
 
+class ScrapingStepResult(BaseModel):
+    """Result of executing a single scraping action."""
+
+    index: int
+    type: Literal["click", "fill", "select", "wait", "custom"]
+    selector: str
+    status: Literal["success", "error", "skipped"]
+    detail: str | None = None
+    input_text: str | None = None
+
+
+class ScrapingExecutionResponse(BaseModel):
+    """Response returned after executing a scraping routine."""
+
+    routine_id: int
+    url: HttpUrl
+    results: list[ScrapingStepResult] = Field(default_factory=list)
+
+
 __all__ = [
     "ScrapingAction",
     "ScrapingActionPreviewRequest",
     "ScrapingRoutineCreateRequest",
     "ScrapingRoutineResponse",
     "ScrapingActionMutationRequest",
+    "ScrapingStepResult",
+    "ScrapingExecutionResponse",
 ]
