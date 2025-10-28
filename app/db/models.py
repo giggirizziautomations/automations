@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from typing import Any, List
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text
 
 from app.core.security import normalize_scopes, scopes_to_string
 from app.db.base import Base
@@ -61,4 +63,31 @@ class ClientApp(Base):
         return normalize_scopes(self.scopes)
 
 
-__all__ = ["User", "ClientApp"]
+class ScrapingRoutine(Base):
+    """Persisted scraping instructions authored by a user."""
+
+    __tablename__ = "scraping_routines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    url = Column(String(2048), nullable=False)
+    mode = Column(String(20), nullable=False, default="headless")
+    actions = Column(JSON, nullable=False, default=list)
+    email = Column(String(255), nullable=False)
+    password_encrypted = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    def get_actions(self) -> List[dict[str, Any]]:
+        return list(self.actions or [])
+
+    def set_actions(self, actions: List[dict[str, Any]]) -> None:
+        self.actions = actions
+
+
+__all__ = ["User", "ClientApp", "ScrapingRoutine"]
