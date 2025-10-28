@@ -63,9 +63,27 @@ class ScrapingActionsUpdate(BaseModel):
         return value
 
 
+class ScrapingActionSuggestion(BaseModel):
+    """Payload describing an HTML snippet to convert into a scraping action."""
+
+    html: str = Field(..., min_length=1)
+    suggestion: str = Field(..., min_length=1)
+    value: Optional[str] = None
+    settle_ms: Optional[int] = Field(default=None, ge=0)
+
+
+class ScrapingActionDocument(BaseModel):
+    """JSON structure returned when rendering scraping actions from HTML."""
+
+    actions: list[ScrapingActionStep]
+    settle_ms: Optional[int] = Field(default=None, ge=0)
+
+
 __all__ = [
     "ScrapingActionStep",
     "ScrapingActionsUpdate",
+    "ScrapingActionDocument",
+    "ScrapingActionSuggestion",
     "ScrapingTargetCreate",
     "ScrapingTargetOut",
 ]
