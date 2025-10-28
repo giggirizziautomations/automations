@@ -273,6 +273,11 @@ interagire, puoi utilizzare i nuovi helper disponibili in `app.scraping.helpers`
    ```
 
    L'API si occupa di escapare i caratteri necessari e restituirà il documento di azione completo.
+   Per retrocompatibilità puoi anche inviare lo stesso contenuto all'interno di una proprietà
+   `payload` (eventualmente serializzata come stringa JSON), nel qual caso qualsiasi chiave
+   riconosciuta presente a livello radice (`html`, `action`/`suggestion`, `value`, `settle_ms`)
+   verrà usata come override. Questo consente di riutilizzare facilmente form e client precedenti
+   senza dover modificare il formato della richiesta.
 
 Puoi combinare più azioni generando differenti step e assemblarli in un'unica struttura JSON da
 salvare nel campo `parameters` della configurazione.
