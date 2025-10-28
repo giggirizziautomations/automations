@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -132,8 +133,6 @@ def _coerce_qs_values(data: dict[str, list[str]]) -> dict[str, object]:
 def _repair_html_quotes(raw_body: str) -> str:
     """Escape unencoded quotes inside the ``html`` attribute if present."""
 
-    import re
-
     pattern = re.compile(r'("html"\s*:\s*")(?P<html>.*?)(?<!\\)"(?=\s*(,|}))', re.DOTALL)
 
     def _replacer(match: re.Match[str]) -> str:
@@ -143,6 +142,51 @@ def _repair_html_quotes(raw_body: str) -> str:
     return pattern.sub(_replacer, raw_body, count=1)
 
 
+def _parse_multipart_form_data(raw_body: bytes, *, boundary: str) -> dict[str, list[str]]:
+    """Parse a multipart form payload keeping only textual fields."""
+
+    boundary = boundary.strip().strip('"')
+    if not boundary:
+        return {}
+
+    delimiter = f"--{boundary}".encode("utf-8", errors="ignore")
+    parts = raw_body.split(delimiter)
+
+    items: dict[str, list[str]] = {}
+    for part in parts:
+        part = part.strip()
+        if not part or part == b"--":
+            continue
+        if part.endswith(b"--"):
+            part = part[:-2]
+        part = part.strip(b"\r\n")
+        headers_blob, _, value_blob = part.partition(b"\r\n\r\n")
+        if not value_blob:
+            continue
+
+        headers = headers_blob.decode("utf-8", errors="ignore").split("\r\n")
+        disposition = next(
+            (header for header in headers if header.lower().startswith("content-disposition")),
+            None,
+        )
+        if not disposition:
+            continue
+
+        name_match = re.search(r'name="(?P<name>[^"]+)"', disposition)
+        if not name_match:
+            continue
+        if re.search(r'filename="', disposition):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="File uploads are not supported for this endpoint",
+            )
+
+        value_text = value_blob.rstrip(b"\r\n").decode("utf-8", errors="ignore")
+        items.setdefault(name_match.group("name"), []).append(value_text)
+
+    return items
+
+
 async def _parse_action_payload(request: Request) -> ScrapingActionPayload:
     raw_bytes = await request.body()
     if not raw_bytes:
@@ -150,20 +194,36 @@ async def _parse_action_payload(request: Request) -> ScrapingActionPayload:
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Request body is required",
         )
-    body_text = raw_bytes.decode("utf-8", errors="ignore")
 
     data: dict[str, object] | None = None
+    content_type = request.headers.get("content-type", "").lower()
 
-    try:
-        data = json.loads(body_text)
-    except json.JSONDecodeError:
+    if "multipart/form-data" in content_type:
+        boundary_match = re.search(r"boundary=(?P<boundary>[^;]+)", content_type)
+        if boundary_match:
+            form_items = _parse_multipart_form_data(
+                raw_bytes, boundary=boundary_match.group("boundary")
+            )
+            if form_items:
+                data = _coerce_qs_values(form_items)
+    elif "application/x-www-form-urlencoded" in content_type:
+        parsed_qs = parse_qs(raw_bytes.decode("utf-8", errors="ignore"))
+        if parsed_qs:
+            data = _coerce_qs_values(parsed_qs)
+
+    if data is None:
+        body_text = raw_bytes.decode("utf-8", errors="ignore")
+
         try:
-            repaired = _repair_html_quotes(body_text)
-            data = json.loads(repaired)
+            data = json.loads(body_text)
         except json.JSONDecodeError:
-            parsed_qs = parse_qs(body_text)
-            if parsed_qs:
-                data = _coerce_qs_values(parsed_qs)
+            try:
+                repaired = _repair_html_quotes(body_text)
+                data = json.loads(repaired)
+            except json.JSONDecodeError:
+                parsed_qs = parse_qs(body_text)
+                if parsed_qs:
+                    data = _coerce_qs_values(parsed_qs)
 
     if data is None:
         raise HTTPException(
