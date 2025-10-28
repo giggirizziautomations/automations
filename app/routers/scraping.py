@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.browser import BrowserSessionNotFound, get_active_page
 from app.core.json_utils import relaxed_json_loads
 from app.core.scraping import generate_scraping_action
 from app.core.security import decrypt_str, encrypt_str
@@ -21,6 +22,11 @@ from app.schemas.scraping import (
     ScrapingActionPreviewRequest,
     ScrapingRoutineCreateRequest,
     ScrapingRoutineResponse,
+    ScrapingExecutionResponse,
+)
+from app.services.scraping_executor import (
+    RoutineCredentials,
+    execute_scraping_routine as execute_scraping_routine_service,
 )
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -231,6 +237,42 @@ async def patch_scraping_action(
     db.commit()
     db.refresh(routine)
     return _serialise_routine(routine)
+
+
+@router.post(
+    "/routines/{routine_id}/execute",
+    response_model=ScrapingExecutionResponse,
+)
+async def execute_scraping_routine(
+    routine_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ScrapingExecutionResponse:
+    """Execute the stored actions of a scraping routine using the open browser."""
+
+    routine = _get_owned_routine(db=db, routine_id=routine_id, user=user)
+    try:
+        page = get_active_page(str(user.id))
+    except BrowserSessionNotFound as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="No open browser session available for this user",
+        ) from exc
+
+    credentials = RoutineCredentials(
+        email=routine.email,
+        password=decrypt_str(routine.password_encrypted),
+    )
+    outcome = await execute_scraping_routine_service(
+        routine=routine,
+        page=page,
+        credentials=credentials,
+    )
+    return ScrapingExecutionResponse(
+        routine_id=routine.id,
+        url=outcome.url,
+        results=outcome.results,
+    )
 
 
 __all__ = ["router"]

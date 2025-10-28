@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core import security
+from app.core.browser import BrowserSessionNotFound
+from app.core.scraping import generate_scraping_action
 from app.db import models
 
 
@@ -237,3 +239,128 @@ def test_routines_are_isolated_per_user(
     )
 
     assert forbidden_append.status_code == 404
+
+
+class _FakePage:
+    def __init__(self, start_url: str) -> None:
+        self.current_url = start_url
+        self.calls: list[tuple[str, ...]] = []
+
+    @property
+    def url(self) -> str:
+        return self.current_url
+
+    async def goto(self, url: str, *, wait_until: str = "networkidle") -> None:
+        self.current_url = url
+        self.calls.append(("goto", url, wait_until))
+
+    async def click(self, selector: str) -> None:
+        self.calls.append(("click", selector))
+
+    async def fill(self, selector: str, value: str) -> None:
+        self.calls.append(("fill", selector, value))
+
+    async def select_option(self, selector: str, value: str) -> None:
+        self.calls.append(("select", selector, value))
+
+    async def wait_for_timeout(self, timeout: float) -> None:
+        self.calls.append(("wait", timeout))
+
+    async def evaluate(self, expression: str) -> None:
+        self.calls.append(("evaluate", expression))
+
+
+def test_execute_routine_runs_actions_with_credentials(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    user_password = "user-pass"
+    routine_password = "routine-secret"
+    user = _create_user(db_session=db_session, password=user_password)
+    routine = models.ScrapingRoutine(
+        user_id=user.id,
+        url="https://example.com/login",
+        mode="headed",
+        email=user.email,
+        password_encrypted=security.encrypt_str(routine_password),
+        actions=[
+            generate_scraping_action(
+                "Fill the email field",
+                "<input id='email-field' name='email' type='email' />",
+            ),
+            generate_scraping_action(
+                "Enter the account password",
+                "<input id='password-field' type='password' />",
+            ),
+            generate_scraping_action(
+                "Click the submit button",
+                "<button id='submit-btn'>Sign in</button>",
+            ),
+        ],
+    )
+    db_session.add(routine)
+    db_session.commit()
+
+    page = _FakePage(start_url=routine.url)
+    captured_user: dict[str, str] = {}
+
+    def fake_get_active_page(user_id: str) -> _FakePage:
+        captured_user["id"] = user_id
+        return page
+
+    monkeypatch.setattr("app.routers.scraping.get_active_page", fake_get_active_page)
+
+    headers = _auth_headers(api_client, email=user.email, password=user_password)
+    response = api_client.post(
+        f"/scraping/routines/{routine.id}/execute",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["routine_id"] == routine.id
+    assert payload["url"] == routine.url
+    assert captured_user["id"] == str(user.id)
+
+    results = payload["results"]
+    assert [result["type"] for result in results] == ["fill", "fill", "click"]
+    assert results[0]["input_text"] == user.email
+    assert results[1]["input_text"] == routine_password
+    assert results[2]["status"] == "success"
+
+    assert ("fill", "#email-field", user.email) in page.calls
+    assert ("fill", "#password-field", routine_password) in page.calls
+    assert ("click", "#submit-btn") in page.calls
+
+
+def test_execute_routine_requires_open_browser(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    user_password = "user-pass"
+    user = _create_user(db_session=db_session, password=user_password)
+    routine = models.ScrapingRoutine(
+        user_id=user.id,
+        url="https://example.com/login",
+        mode="headed",
+        email=user.email,
+        password_encrypted=security.encrypt_str("routine-secret"),
+    )
+    db_session.add(routine)
+    db_session.commit()
+
+    def raise_not_found(user_id: str) -> None:
+        raise BrowserSessionNotFound(user_id)
+
+    monkeypatch.setattr("app.routers.scraping.get_active_page", raise_not_found)
+
+    headers = _auth_headers(api_client, email=user.email, password=user_password)
+    response = api_client.post(
+        f"/scraping/routines/{routine.id}/execute",
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "No open browser session available for this user"

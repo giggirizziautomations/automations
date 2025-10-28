@@ -97,17 +97,59 @@ come l'etichetta dell'elemento, un valore suggerito, l'anteprima HTML e un indic
 confidenza. Per i campi di tipo password viene anche segnalato che il dato atteso è
 sensibile.
 
-### Endpoint disponibili
+## Reference API per router
+
+Ogni router FastAPI viene esposto con un prefisso dedicato e raggruppato tramite tag OpenAPI.
+Tutti gli endpoint richiedono autenticazione bearer token a meno che non sia indicato diversamente.
+
+### Autenticazione (`/auth`)
+
+| Metodo | Percorso | Descrizione | Note |
+| ------ | -------- | ----------- | ---- |
+| `POST` | `/auth/token` | Genera un access token usando credenziali e-mail/password. | Accetta payload JSON o form-url-encoded. |
+| `GET` | `/auth/token` | Genera un access token usando client id e secret registrati. | Richiede query `client_id` e `client_secret`. |
+
+### Browser (`/browser`)
+
+| Metodo | Percorso | Descrizione | Note |
+| ------ | -------- | ----------- | ---- |
+| `POST` | `/browser/open` | Avvia un browser Chromium visibile e apre la pagina richiesta, mantenendo la sessione aperta. | Sostituisce eventuali sessioni Playwright attive dello stesso utente. |
+
+### Profilo utente (`/me`)
+
+| Metodo | Percorso | Descrizione | Note |
+| ------ | -------- | ----------- | ---- |
+| `GET` | `/me` | Restituisce i dati dell'utente autenticato. | |
+| `PATCH` | `/me` | Aggiorna nome, cognome, e-mail o password dell'utente corrente. | Non consente la modifica dei campi amministrativi. |
+
+### Gestione utenti (`/users`)
+
+| Metodo | Percorso | Descrizione | Note |
+| ------ | -------- | ----------- | ---- |
+| `POST` | `/users` | Crea un nuovo utente. | Richiede ruolo amministratore. |
+| `GET` | `/users` | Elenca gli utenti con supporto a paginazione (`skip`, `limit`). | Richiede ruolo amministratore. |
+| `GET` | `/users/{user_id}` | Recupera un utente per identificativo. | Richiede ruolo amministratore. |
+| `PATCH` | `/users` | Aggiorna i dati del proprio account (utente autenticato). | Impedisce di modificare scope o privilegi amministrativi. |
+| `DELETE` | `/users/{user_id}` | Elimina un utente. | Richiede ruolo amministratore. |
+
+### Report protetti (`/reports`)
+
+| Metodo | Percorso | Descrizione | Note |
+| ------ | -------- | ----------- | ---- |
+| `GET` | `/reports` | Restituisce un elenco di report dimostrativi. | Richiede lo scope `reports:read`. |
+
+### Toolkit di scraping (`/scraping`)
 
 Tutti gli endpoint sono protetti da autenticazione bearer token. Le routine sono associate
 all'utente che le crea e non sono accessibili da altri account.
 
 | Metodo | Percorso | Descrizione |
 | ------ | -------- | ----------- |
-| `POST` | `/scraping/routines` | Crea una routine con URL, modalità browser, azioni iniziali ed eventuali credenziali. Se e-mail o password non sono forniti vengono ereditati dall'utente autenticato. |
-| `POST` | `/scraping/actions/preview` | Genera un'anteprima di un'azione a partire da istruzione e frammento HTML, senza persistenza. |
+| `POST` | `/scraping/routines` | Crea una routine con URL, modalità browser, azioni iniziali ed eventuali credenziali. |
+| `POST` | `/scraping/actions/preview` | Genera un'anteprima di un'azione a partire da istruzione e frammento HTML. |
 | `POST` | `/scraping/routines/{routine_id}/actions` | Appende una nuova azione ad una routine esistente. |
 | `PATCH` | `/scraping/routines/{routine_id}/actions/{action_index}` | Sostituisce un'azione esistente con una nuova versione generata da linguaggio naturale. |
+| `POST` | `/scraping/routines/{routine_id}/execute` | Riesegue le azioni memorizzate utilizzando il browser Playwright aperto dall'utente. |
 
 ### Struttura delle azioni
 
