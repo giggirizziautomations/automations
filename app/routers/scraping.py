@@ -1,9 +1,13 @@
 """Endpoints supporting the scraping instruction workflow."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+import json
+from typing import TypeVar
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
-from typing import Annotated
 
 from app.core.auth import get_current_user
 from app.core.json_utils import relaxed_json_loads
@@ -19,8 +23,31 @@ from app.schemas.scraping import (
     ScrapingRoutineResponse,
 )
 
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
 
 router = APIRouter(prefix="/scraping", tags=["scraping"])
+
+
+PREVIEW_REQUEST_BODY = {
+    "required": True,
+    "content": {
+        "application/json": {
+            "schema": ScrapingActionPreviewRequest.model_json_schema(),
+        }
+    },
+}
+
+MUTATION_REQUEST_BODY = {
+    "required": True,
+    "content": {
+        "application/json": {
+            "schema": ScrapingActionMutationRequest.model_json_schema(),
+        }
+    },
+}
+
+
 def _serialise_routine(routine: models.ScrapingRoutine) -> ScrapingRoutineResponse:
     actions = [ScrapingAction(**item) for item in routine.get_actions()]
     password_plain = decrypt_str(routine.password_encrypted)
@@ -53,13 +80,45 @@ def _get_owned_routine(
     return routine
 
 
-PreviewPayload = Annotated[ScrapingActionPreviewRequest, Body(json_loads=relaxed_json_loads)]
-MutationPayload = Annotated[ScrapingActionMutationRequest, Body(json_loads=relaxed_json_loads)]
-
-
 def _generate_action(payload: ScrapingActionPreviewRequest) -> ScrapingAction:
     raw_action = generate_scraping_action(payload.instruction, payload.html_snippet)
     return ScrapingAction(**raw_action)
+
+
+async def _parse_relaxed_payload(
+    request: Request, model: type[ModelT]
+) -> ModelT:
+    """Decode the request body using the relaxed JSON loader and validate it."""
+
+    try:
+        raw_body = await request.body()
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Unable to read request body"
+        ) from exc
+    try:
+        body_text = raw_body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Request body must be valid UTF-8",
+        ) from exc
+    try:
+        data = relaxed_json_loads(body_text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Malformed JSON body",
+        ) from exc
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="JSON body must be an object",
+        )
+    try:
+        return model.model_validate(data)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
 
 
 @router.post(
@@ -97,29 +156,33 @@ def create_scraping_routine(
 @router.post(
     "/actions/preview",
     response_model=ScrapingAction,
+    openapi_extra={"requestBody": PREVIEW_REQUEST_BODY},
 )
-def preview_scraping_action(
-    payload: PreviewPayload,
+async def preview_scraping_action(
+    request: Request,
     user: models.User = Depends(get_current_user),
 ) -> ScrapingAction:
     """Return the structured representation of the requested action."""
 
+    payload = await _parse_relaxed_payload(request, ScrapingActionPreviewRequest)
     return _generate_action(payload)
 
 
 @router.post(
     "/routines/{routine_id}/actions",
     response_model=ScrapingRoutineResponse,
+    openapi_extra={"requestBody": MUTATION_REQUEST_BODY},
 )
-def append_scraping_action(
+async def append_scraping_action(
     routine_id: int,
-    payload: MutationPayload,
+    request: Request,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ScrapingRoutineResponse:
     """Append a new action to an existing routine."""
 
     routine = _get_owned_routine(db=db, routine_id=routine_id, user=user)
+    payload = await _parse_relaxed_payload(request, ScrapingActionMutationRequest)
     action_payload = ScrapingActionPreviewRequest(
         instruction=payload.instruction,
         html_snippet=payload.html_snippet,
@@ -139,11 +202,12 @@ def append_scraping_action(
 @router.patch(
     "/routines/{routine_id}/actions/{action_index}",
     response_model=ScrapingRoutineResponse,
+    openapi_extra={"requestBody": MUTATION_REQUEST_BODY},
 )
-def patch_scraping_action(
+async def patch_scraping_action(
     routine_id: int,
     action_index: int,
-    payload: MutationPayload,
+    request: Request,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ScrapingRoutineResponse:
@@ -154,6 +218,7 @@ def patch_scraping_action(
     if action_index < 0 or action_index >= len(actions):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Action not found")
 
+    payload = await _parse_relaxed_payload(request, ScrapingActionMutationRequest)
     action_payload = ScrapingActionPreviewRequest(
         instruction=payload.instruction,
         html_snippet=payload.html_snippet,
