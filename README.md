@@ -76,12 +76,136 @@ un browser Chromium con interfaccia grafica, raggiunge l'indirizzo richiesto e a
 del caricamento (stato `networkidle`) prima di restituire il controllo. Il browser rimane aperto dopo la
 navigazione così da consentire eventuali interazioni manuali con la pagina già caricata.
 
-### Ripartenza senza moduli di scraping
+## Toolkit di scraping assistito
 
-Questa base di codice non include più le API, i modelli o gli script dedicati allo scraping.
-Il progetto rappresenta quindi un punto di partenza pulito su cui potrai progettare un nuovo
-flusso di raccolta dati, definendo schemi, processi e dipendenze in base alle tue esigenze
-future.
+Il progetto include un toolkit che permette di trasformare istruzioni in linguaggio naturale
+in azioni strutturate pronte per l'esecuzione da parte di un motore di scraping. L'obiettivo
+è assistere utenti senza esperienza tecnica nella definizione dei passaggi necessari a
+interagire con pagine web e raccogliere i dati desiderati.
+
+### Generazione intelligente delle azioni
+
+Ogni azione viene ricavata partendo da due elementi forniti dall'utente:
+
+1. **Istruzione in linguaggio naturale**, ad esempio "Clicca il pulsante di login" oppure
+   "Attendi 2.5 secondi prima di continuare".
+2. **Frammento HTML** relativo all'elemento con cui bisogna interagire.
+
+Il motore inferisce automaticamente il tipo di azione (`click`, `fill`, `select`, `wait` o
+`custom`), costruisce un selettore CSS affidabile e arricchisce l'output con metadati utili,
+come l'etichetta dell'elemento, un valore suggerito, l'anteprima HTML e un indice di
+confidenza. Per i campi di tipo password viene anche segnalato che il dato atteso è
+sensibile.
+
+### Endpoint disponibili
+
+Tutti gli endpoint sono protetti da autenticazione bearer token. Le routine sono associate
+all'utente che le crea e non sono accessibili da altri account.
+
+| Metodo | Percorso | Descrizione |
+| ------ | -------- | ----------- |
+| `POST` | `/scraping/routines` | Crea una routine con URL, modalità browser, azioni iniziali ed eventuali credenziali. Se e-mail o password non sono forniti vengono ereditati dall'utente autenticato. |
+| `POST` | `/scraping/actions/preview` | Genera un'anteprima di un'azione a partire da istruzione e frammento HTML, senza persistenza. |
+| `POST` | `/scraping/routines/{routine_id}/actions` | Appende una nuova azione ad una routine esistente. |
+| `PATCH` | `/scraping/routines/{routine_id}/actions/{action_index}` | Sostituisce un'azione esistente con una nuova versione generata da linguaggio naturale. |
+
+### Struttura delle azioni
+
+L'endpoint di anteprima e quelli di mutazione restituiscono sempre un oggetto con la
+seguente forma:
+
+```json
+{
+  "type": "click",
+  "selector": "#login-btn",
+  "description": "Click the login button",
+  "target_tag": "button",
+  "input_text": null,
+  "metadata": {
+    "attributes": {"id": "login-btn"},
+    "html_preview": "<button id='login-btn'>Sign in</button>",
+    "raw_instruction": "Click the login button",
+    "confidence": 0.95,
+    "label": null,
+    "text": "Sign in",
+    "suggested_value": null,
+    "delay_seconds": null
+  }
+}
+```
+
+- `selector` è costruito automaticamente privilegiando `id`, `data-*` o `name` per
+  massimizzare l'affidabilità.
+- `confidence` rappresenta una stima (0.35–0.95) della solidità del selettore.
+- `delay_seconds` è valorizzato per le azioni di tipo `wait` quando l'istruzione include
+  una durata (supportate millisecondi, secondi e minuti).
+- `suggested_value` viene popolato quando il markup include placeholder o valori di default
+  utili per campi di input o select.
+
+### Persistenza e isolamento
+
+Le routine vengono salvate nella tabella `scraping_routines` con il riferimento all'autore.
+Ogni record memorizza le azioni in formato JSON, l'URL target, la modalità browser (`headless`
+o `headed`) ed eventuali credenziali da usare durante la sessione. Le password vengono
+cifrate con Fernet e recuperate in chiaro solo per l'utente proprietario della routine.
+
+### Esempio di workflow
+
+1. **Creazione**
+
+   ```bash
+   curl -X POST \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "url": "https://example.com/login",
+           "mode": "headless"
+         }' \
+     http://localhost:8000/scraping/routines
+   ```
+
+2. **Anteprima azione**
+
+   ```bash
+   curl -X POST \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "instruction": "Fill the email field with \"demo@example.com\"",
+           "html_snippet": "<input id=\"email\" name=\"email\" placeholder=\"Email\" />"
+         }' \
+     http://localhost:8000/scraping/actions/preview
+   ```
+
+3. **Append**
+
+   ```bash
+   curl -X POST \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "instruction": "Fill the email field with \"demo@example.com\"",
+           "html_snippet": "<input id=\"email\" name=\"email\" placeholder=\"Email\" />"
+         }' \
+     http://localhost:8000/scraping/routines/1/actions
+   ```
+
+4. **Patch**
+
+   ```bash
+   curl -X PATCH \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{
+           "instruction": "Wait for 2 seconds after clicking",
+           "html_snippet": "<div data-testid=\"loader\"></div>"
+         }' \
+     http://localhost:8000/scraping/routines/1/actions/0
+   ```
+
+> ℹ️ **Suggerimento:** includi nel frammento HTML tutti gli attributi utili (id, data-* e
+> name) per aiutare il generatore a proporre selettori precisi e ottenere un indice di
+> confidenza elevato.
 
 > ℹ️ **Nuova istruzione:** per i client `client_credentials` fornisci sempre un `client_id` esplicito.
 > Il comando mostrerà il `client_secret` una sola volta: salvalo in modo sicuro perché
