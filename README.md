@@ -149,7 +149,7 @@ all'utente che le crea e non sono accessibili da altri account.
 | `POST` | `/scraping/actions/preview` | Genera un'anteprima di un'azione a partire da istruzione e frammento HTML. |
 | `POST` | `/scraping/routines/{routine_id}/actions` | Appende una nuova azione ad una routine esistente. |
 | `PATCH` | `/scraping/routines/{routine_id}/actions/{action_index}` | Sostituisce un'azione esistente con una nuova versione generata da linguaggio naturale. |
-| `POST` | `/scraping/routines/{routine_id}/execute` | Riesegue le azioni memorizzate utilizzando il browser Playwright aperto dall'utente. |
+| `POST` | `/scraping/routines/{routine_id}/execute` | Riesegue le azioni memorizzate aprendo il browser se necessario e navigando all'URL della routine prima dell'esecuzione. |
 
 ### Struttura delle azioni
 
