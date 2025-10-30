@@ -334,7 +334,7 @@ def test_execute_routine_runs_actions_with_credentials(
     assert ("click", "#submit-btn") in page.calls
 
 
-def test_execute_routine_requires_open_browser(
+def test_execute_routine_opens_browser_if_missing(
     api_client: TestClient,
     db_session: Session,
     monkeypatch,
@@ -351,10 +351,22 @@ def test_execute_routine_requires_open_browser(
     db_session.add(routine)
     db_session.commit()
 
-    def raise_not_found(user_id: str) -> None:
-        raise BrowserSessionNotFound(user_id)
+    page = _FakePage(start_url=routine.url)
+    open_calls: list[tuple[str, str]] = []
+    ready = {"opened": False}
 
-    monkeypatch.setattr("app.routers.scraping.get_active_page", raise_not_found)
+    def fake_get_active_page(user_id: str) -> _FakePage:
+        if not ready["opened"]:
+            raise BrowserSessionNotFound(user_id)
+        return page
+
+    async def fake_open_webpage(url: str, invoked_by: str) -> dict[str, str]:
+        ready["opened"] = True
+        open_calls.append((url, invoked_by))
+        return {"status": "opened", "url": url, "user": invoked_by}
+
+    monkeypatch.setattr("app.routers.scraping.get_active_page", fake_get_active_page)
+    monkeypatch.setattr("app.routers.scraping.open_webpage", fake_open_webpage)
 
     headers = _auth_headers(api_client, email=user.email, password=user_password)
     response = api_client.post(
@@ -362,5 +374,6 @@ def test_execute_routine_requires_open_browser(
         headers=headers,
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "No open browser session available for this user"
+    assert response.status_code == 200
+    assert response.json()["results"] == []
+    assert open_calls == [(routine.url, str(user.id))]

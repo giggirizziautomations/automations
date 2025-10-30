@@ -10,7 +10,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
-from app.core.browser import BrowserSessionNotFound, get_active_page
+from app.core.browser import BrowserSessionNotFound, get_active_page, open_webpage
 from app.core.json_utils import relaxed_json_loads
 from app.core.scraping import generate_scraping_action
 from app.core.security import decrypt_str, encrypt_str
@@ -251,13 +251,18 @@ async def execute_scraping_routine(
     """Execute the stored actions of a scraping routine using the open browser."""
 
     routine = _get_owned_routine(db=db, routine_id=routine_id, user=user)
+    user_id = str(user.id)
     try:
-        page = get_active_page(str(user.id))
-    except BrowserSessionNotFound as exc:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail="No open browser session available for this user",
-        ) from exc
+        page = get_active_page(user_id)
+    except BrowserSessionNotFound:
+        try:
+            await open_webpage(routine.url, user_id)
+        except Exception as exc:  # pragma: no cover - network / browser failure
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to open browser session",
+            ) from exc
+        page = get_active_page(user_id)
 
     credentials = RoutineCredentials(
         email=routine.email,
