@@ -19,7 +19,11 @@ async def open_browser_page(
 ) -> WebpageOpenResponse:
     """Open the requested page using Playwright and return navigation metadata."""
 
-    result = await open_webpage(str(payload.url), str(user.id))
+    result = await open_webpage(
+        str(payload.url),
+        str(user.id),
+        session_id=payload.session_id,
+    )
     return WebpageOpenResponse(**result)
 
 

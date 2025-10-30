@@ -61,11 +61,21 @@ def test_open_browser_uses_authenticated_user(
     user = _create_user(db_session=db_session, password=password)
     headers = _auth_headers(api_client, email=user.email, password=password)
 
-    captured: dict[str, tuple[str, str]] = {}
+    captured: dict[str, tuple[str, str, str | None]] = {}
 
-    async def fake_open_webpage(url: str, invoked_by: str) -> dict[str, str]:
-        captured["args"] = (url, invoked_by)
-        return {"status": "opened", "url": url, "user": invoked_by}
+    async def fake_open_webpage(
+        url: str,
+        invoked_by: str,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, str]:
+        captured["args"] = (url, invoked_by, session_id)
+        return {
+            "status": "opened",
+            "url": url,
+            "user": invoked_by,
+            "session_id": session_id or "default",
+        }
 
     monkeypatch.setattr("app.routers.browser.open_webpage", fake_open_webpage)
 
@@ -78,3 +88,43 @@ def test_open_browser_uses_authenticated_user(
     assert response.status_code == 200
     assert response.json()["user"] == str(user.id)
     assert captured["args"][1] == str(user.id)
+    assert captured["args"][2] is None
+    assert response.json()["session_id"] == "default"
+
+
+def test_open_browser_honours_requested_session(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    password = "secret123"
+    user = _create_user(db_session=db_session, password=password)
+    headers = _auth_headers(api_client, email=user.email, password=password)
+
+    captured: dict[str, tuple[str, str, str | None]] = {}
+
+    async def fake_open_webpage(
+        url: str,
+        invoked_by: str,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, str]:
+        captured["args"] = (url, invoked_by, session_id)
+        return {
+            "status": "opened",
+            "url": url,
+            "user": invoked_by,
+            "session_id": session_id or "default",
+        }
+
+    monkeypatch.setattr("app.routers.browser.open_webpage", fake_open_webpage)
+
+    response = api_client.post(
+        "/browser/open",
+        json={"url": "https://example.com", "session_id": "session-1"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert captured["args"] == ("https://example.com/", str(user.id), "session-1")
+    assert response.json()["session_id"] == "session-1"
