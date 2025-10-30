@@ -305,8 +305,9 @@ def test_execute_routine_runs_actions_with_credentials(
     page = _FakePage(start_url=routine.url)
     captured_user: dict[str, str] = {}
 
-    def fake_get_active_page(user_id: str) -> _FakePage:
+    def fake_get_active_page(user_id: str, session_id: str | None = None) -> _FakePage:
         captured_user["id"] = user_id
+        captured_user["session_id"] = session_id
         return page
 
     monkeypatch.setattr("app.routers.scraping.get_active_page", fake_get_active_page)
@@ -322,6 +323,7 @@ def test_execute_routine_runs_actions_with_credentials(
     assert payload["routine_id"] == routine.id
     assert payload["url"] == routine.url
     assert captured_user["id"] == str(user.id)
+    assert captured_user["session_id"] is None
 
     results = payload["results"]
     assert [result["type"] for result in results] == ["fill", "fill", "click"]
@@ -355,15 +357,25 @@ def test_execute_routine_opens_browser_if_missing(
     open_calls: list[tuple[str, str]] = []
     ready = {"opened": False}
 
-    def fake_get_active_page(user_id: str) -> _FakePage:
+    def fake_get_active_page(user_id: str, session_id: str | None = None) -> _FakePage:
         if not ready["opened"]:
-            raise BrowserSessionNotFound(user_id)
+            raise BrowserSessionNotFound(user_id, session_id)
         return page
 
-    async def fake_open_webpage(url: str, invoked_by: str) -> dict[str, str]:
+    async def fake_open_webpage(
+        url: str,
+        invoked_by: str,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, str]:
         ready["opened"] = True
-        open_calls.append((url, invoked_by))
-        return {"status": "opened", "url": url, "user": invoked_by}
+        open_calls.append((url, invoked_by, session_id))
+        return {
+            "status": "opened",
+            "url": url,
+            "user": invoked_by,
+            "session_id": session_id or "default",
+        }
 
     monkeypatch.setattr("app.routers.scraping.get_active_page", fake_get_active_page)
     monkeypatch.setattr("app.routers.scraping.open_webpage", fake_open_webpage)
@@ -376,4 +388,51 @@ def test_execute_routine_opens_browser_if_missing(
 
     assert response.status_code == 200
     assert response.json()["results"] == []
-    assert open_calls == [(routine.url, str(user.id))]
+    assert open_calls == [(routine.url, str(user.id), None)]
+
+
+def test_execute_routine_uses_requested_session(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    user_password = "user-pass"
+    user = _create_user(db_session=db_session, password=user_password)
+    routine = models.ScrapingRoutine(
+        user_id=user.id,
+        url="https://example.com/login",
+        mode="headed",
+        email=user.email,
+        password_encrypted=security.encrypt_str("routine-secret"),
+        actions=[
+            generate_scraping_action(
+                "Click the CTA button",
+                "<button id='cta'>Continue</button>",
+            )
+        ],
+    )
+    db_session.add(routine)
+    db_session.commit()
+
+    page = _FakePage(start_url=routine.url)
+    captured_session: dict[str, str | None] = {}
+
+    def fake_get_active_page(user_id: str, session_id: str | None = None) -> _FakePage:
+        captured_session["user_id"] = user_id
+        captured_session["session_id"] = session_id
+        return page
+
+    monkeypatch.setattr("app.routers.scraping.get_active_page", fake_get_active_page)
+
+    headers = _auth_headers(api_client, email=user.email, password=user_password)
+    response = api_client.post(
+        f"/scraping/routines/{routine.id}/execute",
+        headers=headers,
+        params={"session_id": "session-abc"},
+    )
+
+    assert response.status_code == 200
+    assert captured_session == {
+        "user_id": str(user.id),
+        "session_id": "session-abc",
+    }

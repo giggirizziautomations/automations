@@ -245,6 +245,7 @@ async def patch_scraping_action(
 )
 async def execute_scraping_routine(
     routine_id: int,
+    session_id: str | None = None,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ScrapingExecutionResponse:
@@ -253,16 +254,16 @@ async def execute_scraping_routine(
     routine = _get_owned_routine(db=db, routine_id=routine_id, user=user)
     user_id = str(user.id)
     try:
-        page = get_active_page(user_id)
+        page = get_active_page(user_id, session_id=session_id)
     except BrowserSessionNotFound:
         try:
-            await open_webpage(routine.url, user_id)
+            await open_webpage(routine.url, user_id, session_id=session_id)
         except Exception as exc:  # pragma: no cover - network / browser failure
             raise HTTPException(
                 status.HTTP_502_BAD_GATEWAY,
                 detail="Failed to open browser session",
             ) from exc
-        page = get_active_page(user_id)
+        page = get_active_page(user_id, session_id=session_id)
 
     credentials = RoutineCredentials(
         email=routine.email,

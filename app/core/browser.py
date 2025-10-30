@@ -6,7 +6,7 @@ import logging
 from contextlib import suppress
 from dataclasses import dataclass
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Tuple
 
 if TYPE_CHECKING:  # pragma: no cover - imported for type checkers only
     from playwright.async_api import Browser, Playwright, Page
@@ -27,21 +27,44 @@ class BrowserSession:
 class BrowserSessionNotFound(RuntimeError):
     """Raised when a caller attempts to reuse a non-existing session."""
 
-    def __init__(self, user_id: str) -> None:  # pragma: no cover - trivial
-        super().__init__(f"No active browser session for user {user_id!r}")
+    def __init__(self, user_id: str, session_id: str | None = None) -> None:  # pragma: no cover - trivial
+        if session_id is None:
+            message = f"No active browser session for user {user_id!r}"
+        else:
+            message = (
+                f"No active browser session for user {user_id!r}"
+                f" (session {session_id!r})"
+            )
+        super().__init__(message)
         self.user_id = user_id
+        self.session_id = session_id
 
 
-_SESSIONS: Dict[str, BrowserSession] = {}
+_SessionKey = Tuple[str, str]
+_DEFAULT_SESSION_ID = "default"
+_SESSIONS: Dict[_SessionKey, BrowserSession] = {}
 
 
-async def open_webpage(url: str, invoked_by: str) -> dict[str, str]:
+def _session_key(user_id: str, session_id: str | None = None) -> _SessionKey:
+    """Return the internal key used to store sessions."""
+
+    resolved_session = session_id or _DEFAULT_SESSION_ID
+    return user_id, resolved_session
+
+
+async def open_webpage(
+    url: str,
+    invoked_by: str,
+    *,
+    session_id: str | None = None,
+) -> dict[str, str]:
     """Open ``url`` in a headed browser on behalf of ``invoked_by``.
 
     The function launches a Chromium instance, navigates to ``url`` and waits
     for the page to finish loading before returning.  The browser is kept open
     so that callers can continue interacting with the fully rendered page.
-    Any previous session for the same user is gracefully shut down first.
+    Any previous session for the same user and session identifier is
+    gracefully shut down first.
 
     Parameters
     ----------
@@ -49,6 +72,10 @@ async def open_webpage(url: str, invoked_by: str) -> dict[str, str]:
         Address of the page to be opened.
     invoked_by:
         Identifier of the user triggering the navigation.
+
+    session_id:
+        Optional identifier of the browser session to bind to the user. If
+        omitted the default session ``"default"`` is used.
 
     Returns
     -------
@@ -64,7 +91,7 @@ async def open_webpage(url: str, invoked_by: str) -> dict[str, str]:
 
     logger.info("Opening %s for user %s", url, invoked_by)
 
-    await close_browser_session(invoked_by)
+    await close_browser_session(invoked_by, session_id=session_id)
 
     playwright, browser = await _launch_browser()
     page = await browser.new_page()
@@ -78,17 +105,20 @@ async def open_webpage(url: str, invoked_by: str) -> dict[str, str]:
 
     final_url = page.url
     session = BrowserSession(playwright=playwright, browser=browser, page=page)
-    _SESSIONS[invoked_by] = session
-    _register_session_cleanup(invoked_by, session)
+    key = _session_key(invoked_by, session_id)
+    _SESSIONS[key] = session
+    _register_session_cleanup(key, session)
     logger.info("Leaving browser open at %s for %s", final_url, invoked_by)
+    resolved_session = key[1]
     return {
         "status": "opened",
         "url": final_url,
         "user": invoked_by,
+        "session_id": resolved_session,
     }
 
 
-def get_active_session(user_id: str) -> BrowserSession:
+def get_active_session(user_id: str, session_id: str | None = None) -> BrowserSession:
     """Return the active browser session for ``user_id``.
 
     Raises
@@ -97,35 +127,42 @@ def get_active_session(user_id: str) -> BrowserSession:
         If the user has not previously opened a browser session.
     """
 
+    key = _session_key(user_id, session_id)
     try:
-        return _SESSIONS[user_id]
+        return _SESSIONS[key]
     except KeyError as exc:  # pragma: no cover - defensive
-        raise BrowserSessionNotFound(user_id) from exc
+        raise BrowserSessionNotFound(user_id, key[1]) from exc
 
 
-def get_active_page(user_id: str) -> "Page":
+def get_active_page(user_id: str, session_id: str | None = None) -> "Page":
     """Return the Playwright page associated with ``user_id``."""
 
-    return get_active_session(user_id).page
+    return get_active_session(user_id, session_id=session_id).page
 
 
-async def close_browser_session(user_id: str) -> None:
+async def close_browser_session(user_id: str, session_id: str | None = None) -> None:
     """Close and remove any active browser session for ``user_id``."""
 
-    session = _SESSIONS.pop(user_id, None)
+    key = _session_key(user_id, session_id)
+    session = _SESSIONS.pop(key, None)
     if not session:
         return
     await _shutdown_browser(session.playwright, session.browser)
 
 
-def _register_session_cleanup(user_id: str, session: BrowserSession) -> None:
+def _register_session_cleanup(session_key: _SessionKey, session: BrowserSession) -> None:
     """Ensure ``session`` is cleaned up when the browser or page is closed."""
 
     cleanup_started = False
+    user_id, session_id = session_key
 
     async def _cleanup() -> None:
-        logger.info("Cleaning up browser session for %s", user_id)
-        _SESSIONS.pop(user_id, None)
+        logger.info(
+            "Cleaning up browser session for %s (session %s)",
+            user_id,
+            session_id,
+        )
+        _SESSIONS.pop(session_key, None)
         await _shutdown_browser(session.playwright, session.browser)
 
     def _schedule_cleanup() -> None:
