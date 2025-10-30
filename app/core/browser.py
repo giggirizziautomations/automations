@@ -1,6 +1,7 @@
 """Helpers for interacting with web pages via Playwright."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import suppress
 from dataclasses import dataclass
@@ -76,7 +77,9 @@ async def open_webpage(url: str, invoked_by: str) -> dict[str, str]:
         raise
 
     final_url = page.url
-    _SESSIONS[invoked_by] = BrowserSession(playwright=playwright, browser=browser, page=page)
+    session = BrowserSession(playwright=playwright, browser=browser, page=page)
+    _SESSIONS[invoked_by] = session
+    _register_session_cleanup(invoked_by, session)
     logger.info("Leaving browser open at %s for %s", final_url, invoked_by)
     return {
         "status": "opened",
@@ -113,6 +116,32 @@ async def close_browser_session(user_id: str) -> None:
     if not session:
         return
     await _shutdown_browser(session.playwright, session.browser)
+
+
+def _register_session_cleanup(user_id: str, session: BrowserSession) -> None:
+    """Ensure ``session`` is cleaned up when the browser or page is closed."""
+
+    cleanup_started = False
+
+    async def _cleanup() -> None:
+        logger.info("Cleaning up browser session for %s", user_id)
+        _SESSIONS.pop(user_id, None)
+        await _shutdown_browser(session.playwright, session.browser)
+
+    def _schedule_cleanup() -> None:
+        nonlocal cleanup_started
+        if cleanup_started:
+            return
+        cleanup_started = True
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("Unable to schedule cleanup for %s: no running loop", user_id)
+            return
+        loop.create_task(_cleanup())
+
+    session.browser.on("disconnected", _schedule_cleanup)
+    session.page.on("close", _schedule_cleanup)
 
 
 async def _launch_browser(*, headless: bool = False) -> tuple[Playwright, Browser]:
