@@ -151,6 +151,24 @@ all'utente che le crea e non sono accessibili da altri account.
 | `PATCH` | `/scraping/routines/{routine_id}/actions/{action_index}` | Sostituisce un'azione esistente con una nuova versione generata da linguaggio naturale. |
 | `POST` | `/scraping/routines/{routine_id}/execute` | Riesegue le azioni memorizzate aprendo il browser se necessario e navigando all'URL della routine prima dell'esecuzione. |
 
+### Power Automate (`/power-automate`)
+
+Gli endpoint Power Automate permettono di registrare i webhook dei flow personali e di
+richiamarli con payload dinamici. Tutti richiedono autenticazione bearer token.
+
+| Metodo | Percorso | Descrizione | Note |
+| ------ | -------- | ----------- | ---- |
+| `GET` | `/power-automate/flows` | Elenca i flow salvati dall'utente corrente in ordine cronologico. | Restituisce id, metodo HTTP, intestazioni e timeout normalizzati. |
+| `POST` | `/power-automate/flows` | Crea un nuovo flow con nome, URL, metodo HTTP e corpo template opzionale. | Il `body_template` accetta placeholder `{{variabile}}`. |
+| `POST` | `/power-automate/flows/load` | Importa o aggiorna in blocco più flow identificandoli per nome. | Utile per sincronizzare esportazioni da Power Automate. |
+| `PUT` | `/power-automate/flows/{flow_id}` | Aggiorna un flow esistente di proprietà dell'utente. | Valida automaticamente il timeout (1–1800 secondi). |
+| `DELETE` | `/power-automate/flows/{flow_id}` | Elimina un flow salvato. | |
+| `POST` | `/power-automate/flows/{flow_id}/invoke` | Innesca il flow selezionato passando parametri, querystring e override del body. | Supporta `wait_for_completion`, flow di fallback e templating. |
+
+Ogni `body_template`, `parameters`, `query_params` o `body_overrides` può usare placeholder
+`{{path.to.value}}` che verranno sostituiti con i valori forniti al momento dell'invocazione.
+Il motore di templating accetta percorsi puntati (`a.b.c`) e indici per gli array.
+
 ### Struttura delle azioni
 
 L'endpoint di anteprima e quelli di mutazione restituiscono sempre un oggetto con la
@@ -190,6 +208,61 @@ Le routine vengono salvate nella tabella `scraping_routines` con il riferimento 
 Ogni record memorizza le azioni in formato JSON, l'URL target, la modalità browser (`headless`
 o `headed`) ed eventuali credenziali da usare durante la sessione. Le password vengono
 cifrate con Fernet e recuperate in chiaro solo per l'utente proprietario della routine.
+
+### Azioni personalizzate e Power Automate
+
+Le azioni di tipo `custom` possono attivare un flow Power Automate registrato tramite gli
+endpoint dedicati. Imposta nel campo `metadata` dell'azione le seguenti chiavi:
+
+- `power_automate_flow_id`: identificativo numerico del flow creato con
+  `POST /power-automate/flows`.
+- `parameters`, `body_overrides`, `query_params`: dizionari opzionali che verranno
+  interpolati con il motore di templating (`{{context.key}}`, `{{credentials.email}}`,
+  `{{user.email}}`, ecc.) e passati come payload al flow.
+- `variables`: variabili addizionali esposte al templating per questa esecuzione.
+- `wait_for_completion`, `timeout_seconds`: controllano attesa e timeout della chiamata
+  remota (il timeout è limitato a 1800 secondi).
+- `failure_flow_id` e relativi `failure_*`: flow di fallback da avviare automaticamente in
+  caso di errore o timeout.
+- `store_response_as`: salva l'intera risposta JSON del flow nel contesto della routine con
+  il nome indicato.
+- `store_response_fields`: mappa percorsi della risposta (`otp`, `details.code`, …) verso
+  chiavi del contesto (`mfa.code`, `session.token`, …). I valori salvati possono essere
+  riutilizzati nelle azioni successive tramite `metadata.context_key`.
+
+Durante l'esecuzione, la routine espone al templating le seguenti variabili:
+
+- `credentials.email` / `credentials.password`: le credenziali associate alla routine.
+- `context`: stato accumulato dalle azioni precedenti (`store_response_as` e
+  `store_response_fields` alimentano questo dizionario).
+- `user`: id ed e-mail dell'utente autenticato.
+- `parameters`: payload passato all'esecuzione (`parameters` del flow o valori dinamici
+  calcolati da altre azioni).
+
+Un esempio minimo di azione custom che richiama un flow MFA e usa il codice restituito in un
+campo di input successivo:
+
+```json
+{
+  "type": "custom",
+  "description": "Richiedi codice MFA",
+  "metadata": {
+    "power_automate_flow_id": 12,
+    "parameters": {"user": "{{credentials.email}}"},
+    "store_response_fields": {"otp": "mfa.code"}
+  }
+}
+```
+
+Per usare il codice salvato:
+
+```json
+{
+  "type": "fill",
+  "selector": "#otp",
+  "metadata": {"context_key": "mfa.code"}
+}
+```
 
 ## Esportatore Power BI con azioni di scraping
 
@@ -287,6 +360,23 @@ degli step importati dalla routine (`scraping_actions`) insieme ai metadati dell
 Tutte le esecuzioni vengono storicizzate e possono essere consultate tramite gli endpoint
 amministrativi (`GET /power-bi/admin/exports`, `GET /power-bi/admin/exports/{routine_id}`
 e `GET /power-bi/admin/exports/by-parameter/{parametro:valore}`).
+
+### Flow Power Automate nelle esportazioni
+
+Quando una routine di scraping contiene azioni `custom` legate a Power Automate, tali flow
+vengono eseguiti anche durante l'esportazione Power BI. La pipeline riutilizza le stesse
+azioni importate con `PATCH /power-bi/config/scraping-actions`, pertanto:
+
+1. Registra i flow necessari con gli endpoint `/power-automate/flows`.
+2. Aggiungi alla routine di scraping le azioni `custom` che richiamano i flow e salvano i
+   risultati nel contesto (vedi sezione precedente).
+3. Associa la routine alla configurazione Power BI. Durante `POST /power-bi/run/{id}` le
+   azioni verranno eseguite nell'ordine definito, garantendo login, MFA o sincronizzazioni
+   esterne prima del download del report.
+
+Le risposte dei flow salvate nel contesto sono incluse nel payload di export (`payload` →
+`scraping_actions`) così da poter auditare quali codici o token sono stati generati durante
+la sessione.
 
 ### Esempio di workflow
 
