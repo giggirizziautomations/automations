@@ -8,6 +8,18 @@ from app.core import security
 from app.db import models
 
 
+SCRAPING_ACTIONS = [
+    {
+        "type": "click",
+        "selector": "#login-button",
+        "description": "Click the login button",
+        "target_tag": "button",
+        "input_text": None,
+        "metadata": {"confidence": 0.9},
+    }
+]
+
+
 def _create_user(
     *,
     db_session: Session,
@@ -54,6 +66,7 @@ def _configure_power_bi(
             "report_url": "https://example.com/report",
             "export_format": "csv",
             "merge_strategy": "append",
+            "scraping_actions": SCRAPING_ACTIONS,
         },
         headers=headers,
     )
@@ -81,6 +94,7 @@ def test_bi_user_can_configure_and_run_service(
     assert config["report_url"] == "https://example.com/report"
     assert config["export_format"] == "csv"
     assert config["merge_strategy"] == "append"
+    assert config["scraping_actions"] == SCRAPING_ACTIONS
 
     run_response = api_client.post(
         "/power-bi/run",
@@ -92,6 +106,7 @@ def test_bi_user_can_configure_and_run_service(
     assert body["vin"] == "1A4AABBC5KD501999".upper()
     assert body["status"] == "completed"
     assert body["payload"]["parameters"] == {"region": "eu"}
+    assert body["payload"]["scraping_actions"] == SCRAPING_ACTIONS
 
 
 def test_run_requires_configuration(api_client: TestClient, db_session: Session) -> None:

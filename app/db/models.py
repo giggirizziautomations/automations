@@ -110,6 +110,7 @@ class PowerBIServiceConfig(Base):
     merge_strategy = Column(String(20), nullable=False, default="append")
     username = Column(String(255), nullable=True)
     password_encrypted = Column(Text, nullable=True)
+    scraping_actions = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,

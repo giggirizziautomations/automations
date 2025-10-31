@@ -6,6 +6,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, Field, StringConstraints
 
+from app.schemas.scraping import ScrapingAction
+
 
 class PowerBIConfigRequest(BaseModel):
     """Payload used to configure the Power BI integration."""
@@ -28,6 +30,12 @@ class PowerBIConfigRequest(BaseModel):
             "is preserved."
         ),
     )
+    scraping_actions: list[ScrapingAction] = Field(
+        default_factory=list,
+        description=(
+            "Actions executed by the scraping engine before downloading the report."
+        ),
+    )
 
 
 class PowerBIConfigResponse(BaseModel):
@@ -39,6 +47,7 @@ class PowerBIConfigResponse(BaseModel):
     merge_strategy: Literal["append", "replace"]
     username: str | None
     has_password: bool
+    scraping_actions: list[ScrapingAction]
     created_at: datetime
     updated_at: datetime
 

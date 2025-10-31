@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -15,6 +15,27 @@ from app.schemas.power_bi import (
     PowerBIExportResponse,
     PowerBIRunRequest,
 )
+from app.schemas.scraping import ScrapingAction
+
+
+def _load_scraping_actions(
+    actions: Sequence[dict[str, object]] | None,
+) -> list[ScrapingAction]:
+    """Convert raw JSON payloads into :class:`ScrapingAction` instances."""
+
+    if not actions:
+        return []
+    return [ScrapingAction.model_validate(action) for action in actions]
+
+
+def _dump_scraping_actions(
+    actions: Sequence[ScrapingAction],
+) -> list[dict[str, object]]:
+    """Serialize :class:`ScrapingAction` objects into JSON storable dicts."""
+
+    if not actions:
+        return []
+    return [action.model_dump(mode="json") for action in actions]
 
 
 def serialize_config(model: models.PowerBIServiceConfig) -> PowerBIConfigResponse:
@@ -25,6 +46,7 @@ def serialize_config(model: models.PowerBIServiceConfig) -> PowerBIConfigRespons
         merge_strategy=model.merge_strategy,
         username=model.username,
         has_password=bool(model.password_encrypted),
+        scraping_actions=_load_scraping_actions(model.scraping_actions),
         created_at=model.created_at,
         updated_at=model.updated_at,
     )
@@ -67,6 +89,7 @@ def upsert_configuration(
             export_format=payload.export_format,
             merge_strategy=payload.merge_strategy,
             username=payload.username,
+            scraping_actions=_dump_scraping_actions(payload.scraping_actions),
         )
         if payload.password:
             config.password_encrypted = encrypt_str(payload.password)
@@ -78,6 +101,7 @@ def upsert_configuration(
         config.username = payload.username
         if payload.password:
             config.password_encrypted = encrypt_str(payload.password)
+        config.scraping_actions = _dump_scraping_actions(payload.scraping_actions)
     db.commit()
     db.refresh(config)
     return serialize_config(config)
@@ -97,6 +121,10 @@ def run_export(*, db: Session, payload: PowerBIRunRequest) -> PowerBIExportRespo
         "merge_strategy": config.merge_strategy,
         "export_format": config.export_format,
         "generated_at": now.isoformat(),
+        "scraping_actions": [
+            action.model_dump(mode="json")
+            for action in _load_scraping_actions(config.scraping_actions)
+        ],
     }
 
     record = models.PowerBIExportRecord(
