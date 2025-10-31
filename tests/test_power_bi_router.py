@@ -19,6 +19,17 @@ SCRAPING_ACTIONS = [
     }
 ]
 
+MERGED_DATASETS = [
+    [
+        {"vin": "1A4AABBC5KD501999", "region": "eu", "value": 100},
+        {"vin": "1A4AABBC5KD501999", "region": "eu", "value": 150},
+    ],
+    [
+        {"vin": "1A4AABBC5KD501999", "region": "eu", "value": 175},
+        {"vin": "WAUZZZ", "region": "us", "value": 200},
+    ],
+]
+
 
 def _create_user(
     *,
@@ -59,17 +70,23 @@ def _auth_headers(client: TestClient, *, email: str, password: str) -> dict[str,
 def _configure_power_bi(
     client: TestClient,
     headers: dict[str, str],
-) -> None:
+    *,
+    config_id: int | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "report_url": "https://example.com/report",
+        "merge_strategy": "append",
+        "scraping_actions": SCRAPING_ACTIONS,
+    }
+    if config_id is not None:
+        payload["config_id"] = config_id
     response = client.put(
         "/power-bi/config",
-        json={
-            "report_url": "https://example.com/report",
-            "merge_strategy": "append",
-            "scraping_actions": SCRAPING_ACTIONS,
-        },
+        json=payload,
         headers=headers,
     )
     assert response.status_code == 200
+    return response.json()
 
 
 def _create_routine(
@@ -92,7 +109,7 @@ def _create_routine(
     return routine
 
 
-def test_bi_user_can_configure_and_run_service(
+def test_bi_user_can_manage_configurations_and_run_service(
     api_client: TestClient, db_session: Session
 ) -> None:
     password = "secret123"
@@ -105,12 +122,13 @@ def test_bi_user_can_configure_and_run_service(
 
     headers = _auth_headers(api_client, email=user.email, password=password)
 
-    _configure_power_bi(api_client, headers)
+    config_response = _configure_power_bi(api_client, headers)
+    config_id = config_response["id"]
 
     routine = _create_routine(db_session=db_session, user=user)
     patch_response = api_client.patch(
         "/power-bi/config/scraping-actions",
-        json={"routine_id": routine.id},
+        json={"config_id": config_id, "routine_id": routine.id},
         headers=headers,
     )
     assert patch_response.status_code == 200
@@ -118,20 +136,26 @@ def test_bi_user_can_configure_and_run_service(
     assert patched_config["scraping_actions"] == SCRAPING_ACTIONS
     assert patched_config["export_format"] == "xlsx"
 
-    response = api_client.get("/power-bi/config", headers=headers)
-    assert response.status_code == 200
-    config = response.json()
-    assert config["report_url"] == "https://example.com/report"
-    assert config["export_format"] == "xlsx"
-    assert config["merge_strategy"] == "append"
-    assert config["scraping_actions"] == SCRAPING_ACTIONS
+    list_response = api_client.get("/power-bi/config", headers=headers)
+    assert list_response.status_code == 200
+    configs = list_response.json()
+    assert len(configs) == 1
+    assert configs[0]["id"] == config_id
+
+    detail_response = api_client.get(
+        f"/power-bi/config/{config_id}", headers=headers
+    )
+    assert detail_response.status_code == 200
+    assert detail_response.json()["report_url"] == "https://example.com/report"
 
     run_response = api_client.post(
-        "/power-bi/run",
+        f"/power-bi/run/{config_id}",
         json={
             "vin": "1A4AABBC5KD501999",
             "parameters": {"region": "eu"},
             "routine_id": routine.id,
+            "dedup_parameter": "vin",
+            "datasets": MERGED_DATASETS,
         },
         headers=headers,
     )
@@ -143,6 +167,10 @@ def test_bi_user_can_configure_and_run_service(
     assert body["payload"]["parameters"] == {"region": "eu"}
     assert body["payload"]["scraping_actions"] == SCRAPING_ACTIONS
     assert body["payload"]["routine_id"] == routine.id
+    assert body["payload"]["merged_row_count"] == 2
+    assert body["dedup_parameter"] == "vin"
+    assert body["config_id"] == config_id
+    assert body["routine_id"] == routine.id
 
 
 def test_run_requires_configuration(api_client: TestClient, db_session: Session) -> None:
@@ -157,12 +185,18 @@ def test_run_requires_configuration(api_client: TestClient, db_session: Session)
     headers = _auth_headers(api_client, email=user.email, password=password)
 
     response = api_client.post(
-        "/power-bi/run",
-        json={"vin": "123", "parameters": {}, "routine_id": routine.id},
+        "/power-bi/run/999",
+        json={
+            "vin": "123",
+            "parameters": {},
+            "routine_id": routine.id,
+            "dedup_parameter": "vin",
+            "datasets": [[{"vin": "123"}]],
+        },
         headers=headers,
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 404
     assert response.json()["detail"] == "Power BI service configuration is missing"
 
 
@@ -175,19 +209,21 @@ def test_admin_endpoints_require_admin(api_client: TestClient, db_session: Sessi
         scopes=["bi"],
     )
     bi_headers = _auth_headers(api_client, email=bi_user.email, password=password)
-    _configure_power_bi(api_client, bi_headers)
+    config = _configure_power_bi(api_client, bi_headers)
     routine = _create_routine(db_session=db_session, user=bi_user)
     api_client.patch(
         "/power-bi/config/scraping-actions",
-        json={"routine_id": routine.id},
+        json={"config_id": config["id"], "routine_id": routine.id},
         headers=bi_headers,
     )
     api_client.post(
-        "/power-bi/run",
+        f"/power-bi/run/{config['id']}",
         json={
             "vin": "WAUZZZ",
             "parameters": {"foo": "bar"},
             "routine_id": routine.id,
+            "dedup_parameter": "vin",
+            "datasets": MERGED_DATASETS,
         },
         headers=bi_headers,
     )
@@ -208,18 +244,28 @@ def test_admin_endpoints_require_admin(api_client: TestClient, db_session: Sessi
     all_records = list_response.json()
     assert len(all_records) == 1
     assert all_records[0]["vin"] == "WAUZZZ"
+    assert all_records[0]["dedup_parameter"] == "vin"
+
+    dataset_response = api_client.get(
+        f"/power-bi/admin/exports/{routine.id}", headers=admin_headers
+    )
+    assert dataset_response.status_code == 200
+    dataset = dataset_response.json()
+    assert len(dataset) == 2
+    values = {row["parameter_value"] for row in dataset}
+    assert values == {"1A4AABBC5KD501999", "WAUZZZ"}
 
     search_response = api_client.get(
-        "/power-bi/admin/exports/by-vin/WAUZZZ",
+        "/power-bi/admin/exports/by-parameter/vin:WAUZZZ",
         headers=admin_headers,
     )
     assert search_response.status_code == 200
     filtered = search_response.json()
     assert len(filtered) == 1
-    assert filtered[0]["vin"] == "WAUZZZ"
+    assert filtered[0]["parameter_value"] == "WAUZZZ"
 
     empty_search = api_client.get(
-        "/power-bi/admin/exports/by-vin/UNKNOWN",
+        "/power-bi/admin/exports/by-parameter/vin:UNKNOWN",
         headers=admin_headers,
     )
     assert empty_search.status_code == 200

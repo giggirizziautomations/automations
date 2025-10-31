@@ -16,6 +16,7 @@ class Settings(BaseModel):
 
     app_name: str = Field(default="Automations API")
     database_url: str = Field(default="sqlite:///./app.db")
+    duckdb_path: str = Field(default="./power_bi_exports.duckdb")
     fernet_key: Optional[str] = None
     jwt_secret: Optional[str] = None
     access_token_expire_minutes: int = Field(default=15, ge=1)
@@ -31,6 +32,7 @@ def _build_settings() -> Settings:
     return Settings(
         app_name=os.getenv("APP_NAME", "Automations API"),
         database_url=os.getenv("DATABASE_URL", "sqlite:///./app.db"),
+        duckdb_path=os.getenv("DUCKDB_PATH", "./power_bi_exports.duckdb"),
         fernet_key=os.getenv("FERNET_KEY"),
         jwt_secret=os.getenv("JWT_SECRET"),
         access_token_expire_minutes=int(
