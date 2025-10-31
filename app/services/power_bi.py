@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Iterable, Sequence
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.security import encrypt_str
@@ -13,9 +12,11 @@ from app.schemas.power_bi import (
     PowerBIConfigRequest,
     PowerBIConfigResponse,
     PowerBIExportResponse,
+    PowerBIMergedRow,
     PowerBIRunRequest,
 )
 from app.schemas.scraping import ScrapingAction
+from app.services import power_bi_storage
 
 
 def _load_scraping_actions(
@@ -41,6 +42,7 @@ def _dump_scraping_actions(
 def serialize_config(model: models.PowerBIServiceConfig) -> PowerBIConfigResponse:
     return PowerBIConfigResponse(
         id=model.id,
+        user_id=model.user_id,
         report_url=model.report_url,
         export_format=model.export_format,
         merge_strategy=model.merge_strategy,
@@ -55,10 +57,13 @@ def serialize_config(model: models.PowerBIServiceConfig) -> PowerBIConfigRespons
 def _serialize_export(record: models.PowerBIExportRecord) -> PowerBIExportResponse:
     return PowerBIExportResponse(
         id=record.id,
+        config_id=record.config_id,
+        routine_id=record.routine_id,
         vin=record.vin,
         status=record.status,
         export_format=record.export_format,
         report_url=record.report_url,
+        dedup_parameter=record.dedup_parameter,
         payload=record.payload or {},
         notes=record.notes,
         created_at=record.created_at,
@@ -67,24 +72,62 @@ def _serialize_export(record: models.PowerBIExportRecord) -> PowerBIExportRespon
     )
 
 
-def get_configuration(db: Session) -> models.PowerBIServiceConfig | None:
-    """Return the configured Power BI integration if present."""
+def list_configurations(*, db: Session, user_id: int) -> list[PowerBIConfigResponse]:
+    """Return all Power BI configurations owned by ``user_id``."""
 
-    return (
+    configs: Iterable[models.PowerBIServiceConfig] = (
         db.query(models.PowerBIServiceConfig)
-        .order_by(models.PowerBIServiceConfig.id.asc())
+        .filter(models.PowerBIServiceConfig.user_id == user_id)
+        .order_by(models.PowerBIServiceConfig.created_at.asc())
+        .all()
+    )
+    return [serialize_config(config) for config in configs]
+
+
+def _get_configuration_by_id(
+    *, db: Session, user_id: int, config_id: int
+) -> models.PowerBIServiceConfig:
+    config = (
+        db.query(models.PowerBIServiceConfig)
+        .filter(
+            models.PowerBIServiceConfig.id == config_id,
+            models.PowerBIServiceConfig.user_id == user_id,
+        )
         .first()
     )
+    if config is None:
+        raise LookupError("Power BI service configuration is missing")
+    return config
+
+
+def get_configuration_by_id(
+    *, db: Session, user_id: int, config_id: int
+) -> PowerBIConfigResponse:
+    """Return a single configuration owned by ``user_id``."""
+
+    config = _get_configuration_by_id(db=db, user_id=user_id, config_id=config_id)
+    return serialize_config(config)
 
 
 def upsert_configuration(
-    *, db: Session, payload: PowerBIConfigRequest
+    *, db: Session, user_id: int, payload: PowerBIConfigRequest
 ) -> PowerBIConfigResponse:
-    """Create or update the Power BI configuration from ``payload``."""
+    """Create or update a Power BI configuration from ``payload``."""
 
-    config = get_configuration(db)
-    if config is None:
+    if payload.config_id is not None:
+        config = (
+            db.query(models.PowerBIServiceConfig)
+            .filter(
+                models.PowerBIServiceConfig.id == payload.config_id,
+                models.PowerBIServiceConfig.user_id == user_id,
+            )
+            .first()
+        )
+        if config is None:
+            raise LookupError("Power BI service configuration is missing")
+    else:
         config = models.PowerBIServiceConfig(
+            user_id=user_id,
             report_url=str(payload.report_url),
             export_format="xlsx",
             merge_strategy=payload.merge_strategy,
@@ -94,14 +137,18 @@ def upsert_configuration(
         if payload.password:
             config.password_encrypted = encrypt_str(payload.password)
         db.add(config)
-    else:
-        config.report_url = str(payload.report_url)
-        config.export_format = "xlsx"
-        config.merge_strategy = payload.merge_strategy
-        config.username = payload.username
-        if payload.password:
-            config.password_encrypted = encrypt_str(payload.password)
-        config.scraping_actions = _dump_scraping_actions(payload.scraping_actions)
+        db.commit()
+        db.refresh(config)
+        return serialize_config(config)
+
+    config.report_url = str(payload.report_url)
+    config.export_format = "xlsx"
+    config.merge_strategy = payload.merge_strategy
+    config.username = payload.username
+    if payload.password:
+        config.password_encrypted = encrypt_str(payload.password)
+    config.scraping_actions = _dump_scraping_actions(payload.scraping_actions)
+    db.add(config)
     db.commit()
     db.refresh(config)
     return serialize_config(config)
@@ -121,13 +168,12 @@ def _load_routine_with_actions(
     return routine, actions
 
 
-def apply_scraping_routine(*, db: Session, routine_id: int) -> PowerBIConfigResponse:
+def apply_scraping_routine(
+    *, db: Session, user_id: int, config_id: int, routine_id: int
+) -> PowerBIConfigResponse:
     """Copy actions from a scraping routine into the Power BI configuration."""
 
-    config = get_configuration(db)
-    if config is None:
-        raise ValueError("Power BI service configuration is missing")
-
+    config = _get_configuration_by_id(db=db, user_id=user_id, config_id=config_id)
     routine, actions = _load_routine_with_actions(db, routine_id)
     config.scraping_actions = _dump_scraping_actions(actions)
     config.export_format = "xlsx"
@@ -137,14 +183,37 @@ def apply_scraping_routine(*, db: Session, routine_id: int) -> PowerBIConfigResp
     return serialize_config(config)
 
 
-def run_export(*, db: Session, payload: PowerBIRunRequest) -> PowerBIExportResponse:
+def _merge_datasets(
+    datasets: Sequence[Sequence[dict[str, object]]], dedup_parameter: str
+) -> list[dict[str, object]]:
+    if not datasets:
+        raise ValueError("At least one dataset must be provided")
+
+    merged: dict[str, dict[str, object]] = {}
+    for dataset in datasets:
+        for row in dataset:
+            if dedup_parameter not in row:
+                raise ValueError(
+                    f"Row missing deduplication parameter '{dedup_parameter}'"
+                )
+            key = str(row[dedup_parameter])
+            merged[key] = dict(row)
+    return list(merged.values())
+
+
+def run_export(
+    *,
+    db: Session,
+    user_id: int,
+    config_id: int,
+    payload: PowerBIRunRequest,
+) -> PowerBIExportResponse:
     """Simulate scraping, downloading and merging a Power BI report."""
 
-    config = get_configuration(db)
-    if config is None:
-        raise ValueError("Power BI service configuration is missing")
-
+    config = _get_configuration_by_id(db=db, user_id=user_id, config_id=config_id)
     routine, routine_actions = _load_routine_with_actions(db, payload.routine_id)
+
+    merged_rows = _merge_datasets(payload.datasets, payload.dedup_parameter)
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     prepared_payload = {
@@ -159,13 +228,18 @@ def run_export(*, db: Session, payload: PowerBIRunRequest) -> PowerBIExportRespo
         "scraping_actions": [
             action.model_dump(mode="json") for action in routine_actions
         ],
+        "dedup_parameter": payload.dedup_parameter,
+        "merged_row_count": len(merged_rows),
     }
 
     record = models.PowerBIExportRecord(
+        config_id=config.id,
+        routine_id=routine.id,
         vin=payload.vin.upper(),
         report_url=config.report_url,
         export_format=config.export_format,
         status="completed",
+        dedup_parameter=payload.dedup_parameter,
         payload=prepared_payload,
         notes=payload.notes,
         created_at=now,
@@ -175,6 +249,15 @@ def run_export(*, db: Session, payload: PowerBIRunRequest) -> PowerBIExportRespo
     db.add(record)
     db.commit()
     db.refresh(record)
+
+    power_bi_storage.store_rows(
+        export_id=record.id,
+        routine_id=routine.id,
+        config_id=config.id,
+        dedup_parameter=payload.dedup_parameter,
+        rows=merged_rows,
+    )
+
     return _serialize_export(record)
 
 
@@ -189,30 +272,30 @@ def list_exports(db: Session) -> list[PowerBIExportResponse]:
     return [_serialize_export(record) for record in records]
 
 
-def search_exports_by_vin(db: Session, vin: str) -> list[PowerBIExportResponse]:
-    """Return all export records matching ``vin`` (case insensitive)."""
+def get_export_dataset(routine_id: int) -> list[PowerBIMergedRow]:
+    """Return merged dataset rows for ``routine_id`` from DuckDB."""
 
-    vin_normalised = vin.strip()
-    if not vin_normalised:
-        return []
-    records: Iterable[models.PowerBIExportRecord] = (
-        db.query(models.PowerBIExportRecord)
-        .filter(
-            func.lower(models.PowerBIExportRecord.vin)
-            == vin_normalised.lower()
-        )
-        .order_by(models.PowerBIExportRecord.created_at.desc())
-        .all()
-    )
-    return [_serialize_export(record) for record in records]
+    rows = power_bi_storage.fetch_by_routine_id(routine_id)
+    return [PowerBIMergedRow.model_validate(row) for row in rows]
+
+
+def search_export_dataset_by_parameter(
+    parameter: str, value: str
+) -> list[PowerBIMergedRow]:
+    """Return merged dataset rows filtered by ``parameter`` and ``value``."""
+
+    rows = power_bi_storage.fetch_by_parameter(parameter, value)
+    return [PowerBIMergedRow.model_validate(row) for row in rows]
 
 
 __all__ = [
     "apply_scraping_routine",
-    "get_configuration",
+    "get_configuration_by_id",
+    "get_export_dataset",
+    "list_configurations",
     "list_exports",
     "run_export",
+    "search_export_dataset_by_parameter",
     "serialize_config",
-    "search_exports_by_vin",
     "upsert_configuration",
 ]

@@ -105,6 +105,12 @@ class PowerBIServiceConfig(Base):
     __tablename__ = "power_bi_service_configs"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     report_url = Column(String(2048), nullable=False)
     export_format = Column(String(20), nullable=False, default="xlsx")
     merge_strategy = Column(String(20), nullable=False, default="append")
@@ -126,10 +132,18 @@ class PowerBIExportRecord(Base):
     __tablename__ = "power_bi_export_records"
 
     id = Column(Integer, primary_key=True, index=True)
+    config_id = Column(
+        Integer,
+        ForeignKey("power_bi_service_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    routine_id = Column(Integer, nullable=False, index=True)
     vin = Column(String(64), nullable=False, index=True)
     report_url = Column(String(2048), nullable=False)
     export_format = Column(String(20), nullable=False)
     status = Column(String(20), nullable=False, default="completed")
+    dedup_parameter = Column(String(255), nullable=False)
     payload = Column(JSON, nullable=False, default=dict)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

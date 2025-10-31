@@ -203,22 +203,27 @@ report.
 
 | Metodo | Percorso | Descrizione | Note |
 | ------ | -------- | ----------- | ---- |
-| `GET` | `/power-bi/config` | Restituisce la configurazione corrente dell'integrazione Power BI. | Richiede ruolo admin o scope `bi`. |
-| `PUT` | `/power-bi/config` | Crea o aggiorna la configurazione (URL, strategia merge, credenziali). | L'esportazione utilizza sempre il formato Excel `xlsx`. |
-| `PATCH` | `/power-bi/config/scraping-actions` | Importa le azioni di una routine di scraping esistente nella configurazione Power BI. | Consente di riutilizzare le routine create tramite `/scraping`. |
-| `POST` | `/power-bi/run` | Avvia l'esportazione per un VIN specifico eseguendo la routine indicata. | Il body deve contenere `routine_id` per scegliere la routine da applicare. |
+| `GET` | `/power-bi/config` | Elenca tutte le configurazioni Power BI appartenenti all'utente autenticato. | Richiede ruolo admin o scope `bi`. |
+| `GET` | `/power-bi/config/{id}` | Restituisce la configurazione Power BI identificata da `id`. | Accessibile solo se la configurazione appartiene all'utente autenticato. |
+| `PUT` | `/power-bi/config` | Crea o aggiorna una configurazione (URL, strategia merge, credenziali). | Specificare `config_id` nel body per aggiornare una configurazione esistente. L'esportazione utilizza sempre il formato Excel `xlsx`. |
+| `PATCH` | `/power-bi/config/scraping-actions` | Importa le azioni di una routine di scraping esistente nella configurazione Power BI. | Consente di riutilizzare le routine create tramite `/scraping`; il body richiede `config_id` e `routine_id`. |
+| `POST` | `/power-bi/run/{id}` | Avvia l'esportazione per una configurazione specifica applicando la routine indicata. | Il body deve contenere `routine_id`, `dedup_parameter` e i dataset scaricati. |
 | `GET` | `/power-bi/admin/exports` | Elenca tutte le esportazioni registrate. | Disponibile solo agli amministratori. |
-| `GET` | `/power-bi/admin/exports/by-vin/{vin}` | Filtra le esportazioni registrate per VIN. | Disponibile solo agli amministratori. |
+| `GET` | `/power-bi/admin/exports/{id}` | Restituisce i dati unificati della routine `id` salvati in DuckDB. | Disponibile solo agli amministratori. |
+| `GET` | `/power-bi/admin/exports/by-parameter/{parametro:valore}` | Filtra i dati salvati in DuckDB usando un filtro `parametro:valore`. | Disponibile solo agli amministratori. |
 
 Ogni esportazione viene registrata con il formato di download `xlsx` e include nel payload
 i metadati della routine utilizzata (`routine_id`, URL e modalità) insieme alle azioni
-rieseguite.
+rieseguite. I dataset scaricati vengono fusi utilizzando il parametro di deduplicazione
+indicato (`dedup_parameter`) e il risultato viene salvato in un database DuckDB per le
+interrogazioni amministrative successive.
 
 ### Configurazione del servizio
 
 1. Autenticati con un utente dotato dello scope `bi` oppure con un amministratore.
 2. Esegui una richiesta `PUT /power-bi/config` fornendo l'URL del report, le opzioni di
    merge ed eventualmente le credenziali. Il campo `export_format` viene forzato a `xlsx`.
+   Indica `config_id` nel body se desideri aggiornare una configurazione esistente.
 3. Associa le azioni di scraping con `PATCH /power-bi/config/scraping-actions`, indicando
    l'identificativo di una routine creata tramite gli endpoint `/scraping`.
 
@@ -243,15 +248,16 @@ Una volta creata (o aggiornata) la routine di scraping, importala nella configur
 curl -X PATCH \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"routine_id": 42}' \
+  -d '{"config_id": 7, "routine_id": 42}' \
   http://localhost:8000/power-bi/config/scraping-actions
 ```
 
 ### Esecuzione di un'esportazione
 
-In seguito alla configurazione, invia una richiesta `POST /power-bi/run` specificando il
-VIN (o un identificativo equivalente), i parametri da passare al report e la routine da
-eseguire:
+In seguito alla configurazione, invia una richiesta `POST /power-bi/run/{id}` specificando
+il VIN (o un identificativo equivalente), i parametri da passare al report, la routine da
+eseguire e il parametro di deduplicazione che verrà utilizzato per unire i dataset
+scaricati:
 
 ```bash
 curl -X POST \
@@ -261,15 +267,26 @@ curl -X POST \
         "vin": "1A4AABBC5KD501999",
         "parameters": {"region": "eu"},
         "routine_id": 42,
+        "dedup_parameter": "vin",
+        "datasets": [
+          [
+            {"vin": "1A4AABBC5KD501999", "value": 100},
+            {"vin": "WAUZZZ", "value": 200}
+          ],
+          [
+            {"vin": "1A4AABBC5KD501999", "value": 250}
+          ]
+        ],
         "notes": "Report mensile"
       }' \
-  http://localhost:8000/power-bi/run
+  http://localhost:8000/power-bi/run/7
 ```
 
 La risposta include lo stato dell'export e, all'interno della chiave `payload`, una copia
 degli step importati dalla routine (`scraping_actions`) insieme ai metadati della stessa.
 Tutte le esecuzioni vengono storicizzate e possono essere consultate tramite gli endpoint
-amministrativi (`GET /power-bi/admin/exports` e `GET /power-bi/admin/exports/by-vin/{vin}`).
+amministrativi (`GET /power-bi/admin/exports`, `GET /power-bi/admin/exports/{routine_id}`
+e `GET /power-bi/admin/exports/by-parameter/{parametro:valore}`).
 
 ### Esempio di workflow
 

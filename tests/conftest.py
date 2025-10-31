@@ -21,10 +21,12 @@ def test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
 
     key = Fernet.generate_key().decode()
     db_path = tmp_path / "test.db"
+    duckdb_path = tmp_path / "exports.duckdb"
     monkeypatch.setenv("FERNET_KEY", key)
     monkeypatch.setenv("JWT_SECRET", "test-secret")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
+    monkeypatch.setenv("DUCKDB_PATH", str(duckdb_path))
 
     reload_settings()
     security.get_fernet.cache_clear()  # type: ignore[attr-defined]
