@@ -191,6 +191,80 @@ Ogni record memorizza le azioni in formato JSON, l'URL target, la modalità brow
 o `headed`) ed eventuali credenziali da usare durante la sessione. Le password vengono
 cifrate con Fernet e recuperate in chiaro solo per l'utente proprietario della routine.
 
+## Esportatore Power BI con azioni di scraping
+
+L'integrazione Power BI fornisce una pipeline completa per scaricare report e registrare
+lo storico delle esportazioni. A partire da questa versione è possibile allegare alla
+configurazione le stesse azioni strutturate generate dal toolkit di scraping così da
+preparare la pagina (login, navigazione, filtri, ecc.) prima di avviare il download del
+report.
+
+### Configurazione del servizio
+
+1. Autenticati con un utente dotato dello scope `bi` oppure con un amministratore.
+2. Esegui una richiesta `PUT /power-bi/config` fornendo l'URL del report, le opzioni di
+   merge ed eventualmente le credenziali.
+3. Usa il campo `scraping_actions` per elencare le azioni da rieseguire ad ogni export.
+
+Esempio completo:
+
+```bash
+curl -X PUT \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "report_url": "https://app.powerbi.com/groups/me/reports/12345",
+        "export_format": "csv",
+        "merge_strategy": "append",
+        "username": "bi.user@example.com",
+        "password": "Sup3rSecret",
+        "scraping_actions": [
+          {
+            "type": "click",
+            "selector": "#login-button",
+            "description": "Apre il form di autenticazione",
+            "target_tag": "button",
+            "metadata": {"confidence": 0.92}
+          },
+          {
+            "type": "fill",
+            "selector": "input[name=\"email\"]",
+            "description": "Inserisce l'email aziendale",
+            "input_text": "bi.user@example.com"
+          }
+        ]
+      }' \
+  http://localhost:8000/power-bi/config
+```
+
+Le azioni supportano gli stessi campi descritti nel paragrafo "Struttura delle azioni" e
+possono essere generate tramite gli endpoint `/scraping/actions/preview` e
+`/scraping/routines/.../actions`. È possibile omettere `password` nelle richieste successive
+per mantenere il valore precedentemente cifrato nel database.
+
+### Esecuzione di un'esportazione
+
+Una volta configurato il servizio, invia una richiesta `POST /power-bi/run` specificando
+il VIN o un identificativo equivalente e, opzionalmente, i parametri da passare al report:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "vin": "1A4AABBC5KD501999",
+        "parameters": {"region": "eu"},
+        "notes": "Report mensile"
+      }' \
+  http://localhost:8000/power-bi/run
+```
+
+La risposta include lo stato dell'export e, all'interno della chiave `payload`, una copia
+degli step elencati in `scraping_actions` così da poter verificare quali interazioni verranno
+eseguite prima del download. Tutte le esecuzioni vengono storicizzate e possono essere
+consultate tramite gli endpoint amministrativi (`GET /power-bi/admin/exports` e
+`GET /power-bi/admin/exports/by-vin/{vin}`).
+
 ### Esempio di workflow
 
 1. **Creazione**
