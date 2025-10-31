@@ -5,7 +5,16 @@ from datetime import datetime
 
 from typing import Any, List
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+)
 
 from app.core.security import normalize_scopes, scopes_to_string
 from app.db.base import Base
@@ -90,4 +99,52 @@ class ScrapingRoutine(Base):
         self.actions = actions
 
 
-__all__ = ["User", "ClientApp", "ScrapingRoutine"]
+class PowerBIServiceConfig(Base):
+    """Configuration required to access and export Power BI reports."""
+
+    __tablename__ = "power_bi_service_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    report_url = Column(String(2048), nullable=False)
+    export_format = Column(String(20), nullable=False, default="csv")
+    merge_strategy = Column(String(20), nullable=False, default="append")
+    username = Column(String(255), nullable=True)
+    password_encrypted = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class PowerBIExportRecord(Base):
+    """Stores the result of an executed Power BI export."""
+
+    __tablename__ = "power_bi_export_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vin = Column(String(64), nullable=False, index=True)
+    report_url = Column(String(2048), nullable=False)
+    export_format = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=False, default="completed")
+    payload = Column(JSON, nullable=False, default=dict)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    merged_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+__all__ = [
+    "User",
+    "ClientApp",
+    "ScrapingRoutine",
+    "PowerBIServiceConfig",
+    "PowerBIExportRecord",
+]

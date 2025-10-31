@@ -9,6 +9,7 @@ from app.routers import auth
 from app.routers import browser as browser_router
 from app.routers import me as me_router
 from app.routers import reports as reports_router
+from app.routers import power_bi as power_bi_router
 from app.routers import users as users_router
 from app.routers import scraping as scraping_router
 
@@ -24,6 +25,7 @@ app.include_router(me_router.router)
 app.include_router(reports_router.router)
 app.include_router(browser_router.router)
 app.include_router(scraping_router.router)
+app.include_router(power_bi_router.router)
 
 
 @app.get("/health", tags=["health"])
