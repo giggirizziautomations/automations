@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Any, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable, Protocol
 
 from app.db import models
 from app.schemas.scraping import ScrapingAction
@@ -54,13 +54,66 @@ class ScrapingExecutionOutcome:
     results: list[dict[str, Any]]
 
 
+@dataclass
+class CustomActionResult:
+    """Result returned by a custom action handler."""
+
+    status: str
+    detail: str | None = None
+    context_updates: dict[str, Any] = field(default_factory=dict)
+
+
+CustomActionHandler = Callable[
+    [ScrapingAction, RoutineCredentials, dict[str, Any]],
+    Awaitable[CustomActionResult | None],
+]
+
+
 def _parse_actions(routine: models.ScrapingRoutine) -> list[ScrapingAction]:
     actions_raw = routine.get_actions()
     return [ScrapingAction(**action) for action in actions_raw]
 
 
-def _resolve_input_value(action: ScrapingAction, credentials: RoutineCredentials) -> str | None:
+def _lookup_context_value(context: dict[str, Any], key: str) -> Any:
+    current: Any = context
+    for chunk in key.split("."):
+        chunk = chunk.strip()
+        if not chunk:
+            return None
+        if isinstance(current, dict):
+            current = current.get(chunk)
+        else:
+            return None
+    return current
+
+
+def _merge_context(target: dict[str, Any], updates: dict[str, Any]) -> None:
+    for key, value in updates.items():
+        if (
+            key in target
+            and isinstance(target[key], dict)
+            and isinstance(value, dict)
+        ):
+            _merge_context(target[key], value)
+        else:
+            target[key] = value
+
+
+def _resolve_input_value(
+    action: ScrapingAction,
+    credentials: RoutineCredentials,
+    context: dict[str, Any],
+) -> str | None:
     metadata = action.metadata or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    context_key = metadata.get("context_key")
+    if isinstance(context_key, str):
+        context_value = _lookup_context_value(context, context_key)
+        if context_value is not None:
+            return str(context_value)
+
     attributes = metadata.get("attributes", {}) if isinstance(metadata, dict) else {}
 
     if action.input_text:
@@ -96,8 +149,12 @@ def _resolve_input_value(action: ScrapingAction, credentials: RoutineCredentials
     return None
 
 
-def _resolve_select_value(action: ScrapingAction, credentials: RoutineCredentials) -> str | None:
-    value = _resolve_input_value(action, credentials)
+def _resolve_select_value(
+    action: ScrapingAction,
+    credentials: RoutineCredentials,
+    context: dict[str, Any],
+) -> str | None:
+    value = _resolve_input_value(action, credentials, context)
     if value is not None:
         return value
 
@@ -125,6 +182,8 @@ async def _execute_single_action(
     index: int,
     action: ScrapingAction,
     credentials: RoutineCredentials,
+    context: dict[str, Any],
+    custom_action_handler: CustomActionHandler | None,
 ) -> dict[str, Any]:
     status = "success"
     detail: str | None = None
@@ -134,14 +193,14 @@ async def _execute_single_action(
         if action.type == "click":
             await page.click(action.selector)
         elif action.type == "fill":
-            used_input = _resolve_input_value(action, credentials)
+            used_input = _resolve_input_value(action, credentials, context)
             if used_input is None:
                 status = "skipped"
                 detail = "No value available for fill action"
             else:
                 await page.fill(action.selector, used_input)
         elif action.type == "select":
-            used_input = _resolve_select_value(action, credentials)
+            used_input = _resolve_select_value(action, credentials, context)
             if used_input is None:
                 status = "skipped"
                 detail = "No option value available for select action"
@@ -151,13 +210,24 @@ async def _execute_single_action(
             timeout_ms = _resolve_wait_timeout(action)
             await page.wait_for_timeout(timeout_ms)
         else:  # custom or other
-            metadata = action.metadata or {}
-            script = metadata.get("script") if isinstance(metadata, dict) else None
-            if script:
-                await page.evaluate(script)
-            else:
-                status = "skipped"
-                detail = "No executable script provided"
+            handled = False
+            if custom_action_handler is not None:
+                custom_result = await custom_action_handler(action, credentials, context)
+                if custom_result is not None:
+                    status = custom_result.status
+                    detail = custom_result.detail
+                    updates = custom_result.context_updates or {}
+                    if updates:
+                        _merge_context(context, updates)
+                    handled = True
+            if not handled:
+                metadata = action.metadata or {}
+                script = metadata.get("script") if isinstance(metadata, dict) else None
+                if script:
+                    await page.evaluate(script)
+                else:
+                    status = "skipped"
+                    detail = "No executable script provided"
     except Exception as exc:  # pragma: no cover - exercised via tests with fakes
         logger.exception("Failed to execute action %s at index %s", action.type, index)
         status = "error"
@@ -178,6 +248,7 @@ async def execute_scraping_routine(
     routine: models.ScrapingRoutine,
     page: PageProtocol,
     credentials: RoutineCredentials,
+    custom_action_handler: CustomActionHandler | None = None,
 ) -> ScrapingExecutionOutcome:
     """Execute ``routine`` using ``page`` and return structured results."""
 
@@ -187,12 +258,15 @@ async def execute_scraping_routine(
         await page.goto(routine.url, wait_until="networkidle")
 
     results: list[dict[str, Any]] = []
+    context: dict[str, Any] = {}
     for index, action in enumerate(actions):
         result = await _execute_single_action(
             page=page,
             index=index,
             action=action,
             credentials=credentials,
+            context=context,
+            custom_action_handler=custom_action_handler,
         )
         results.append(result)
 

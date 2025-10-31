@@ -1,6 +1,8 @@
 """Tests for the scraping instruction endpoints."""
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,7 @@ from app.core import security
 from app.core.browser import BrowserSessionNotFound
 from app.core.scraping import generate_scraping_action
 from app.db import models
+from app.services.power_automate import PowerAutomateInvocationResult
 
 
 def _create_user(
@@ -159,6 +162,7 @@ def test_append_and_patch_actions(
     assert len(data["actions"]) == 1
     assert data["actions"][0]["selector"] == "#login-btn"
 
+
     patch_response = api_client.patch(
         f"/scraping/routines/{routine_id}/actions/0",
         json={
@@ -176,6 +180,123 @@ def test_append_and_patch_actions(
     assert patched["actions"][0]["input_text"] == "demo@example.com"
     assert patched["actions"][0]["metadata"]["label"] is None
     assert patched["actions"][0]["metadata"]["confidence"] == 0.95
+
+
+def test_execute_routine_triggers_power_automate_flow(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    password = "secret123"
+    user = _create_user(db_session=db_session, password=password)
+    headers = _auth_headers(api_client, email=user.email, password=password)
+
+    flow = models.PowerAutomateFlow(
+        user_id=user.id,
+        name="MFA",
+        method="POST",
+        url="https://flow.example.com/trigger",
+        body_template={"user": "{{parameters.user}}"},
+        headers={},
+        timeout_seconds=60,
+    )
+    db_session.add(flow)
+    db_session.commit()
+
+    actions: list[dict[str, Any]] = [
+        {
+            "type": "custom",
+            "selector": "",
+            "description": "Trigger MFA flow",
+            "metadata": {
+                "power_automate_flow_id": flow.id,
+                "parameters": {
+                    "user": "{{credentials.email}}",
+                    "session": "{{session_id}}",
+                },
+                "variables": {"session_id": "abc123"},
+                "store_response_fields": {"otp": "mfa.code"},
+            },
+        },
+        {
+            "type": "fill",
+            "selector": "#otp-input",
+            "description": "Enter MFA code",
+            "metadata": {"context_key": "mfa.code"},
+        },
+    ]
+    routine = models.ScrapingRoutine(
+        user_id=user.id,
+        url="https://example.com/login",
+        mode="headless",
+        email=user.email,
+        password_encrypted=security.encrypt_str("Password123"),
+        actions=actions,
+    )
+    db_session.add(routine)
+    db_session.commit()
+
+    captured: dict[str, Any] = {}
+
+    async def fake_invoke_flow(**kwargs: Any) -> PowerAutomateInvocationResult:
+        captured.update(kwargs)
+        return PowerAutomateInvocationResult(
+            flow_id=kwargs["flow_id"],
+            status="success",
+            http_status=200,
+            response={"otp": "654321"},
+            detail=None,
+            failure_flow_triggered=False,
+        )
+
+    monkeypatch.setattr("app.services.power_automate.invoke_flow", fake_invoke_flow)
+
+    class FakePage:
+        def __init__(self) -> None:
+            self.url = "https://example.com/login"
+            self.fills: list[tuple[str, str]] = []
+
+        async def goto(self, url: str, *, wait_until: str = "networkidle") -> None:
+            self.url = url
+
+        async def click(self, selector: str) -> None:  # pragma: no cover - unused in test
+            return None
+
+        async def fill(self, selector: str, value: str) -> None:
+            self.fills.append((selector, value))
+
+        async def select_option(self, selector: str, value: str) -> None:  # pragma: no cover
+            return None
+
+        async def wait_for_timeout(self, timeout: float) -> None:  # pragma: no cover
+            return None
+
+        async def evaluate(self, expression: str) -> None:  # pragma: no cover
+            return None
+
+    fake_page = FakePage()
+    monkeypatch.setattr(
+        "app.routers.scraping.get_active_page", lambda *args, **kwargs: fake_page
+    )
+
+    response = api_client.post(
+        f"/scraping/routines/{routine.id}/execute",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["routine_id"] == routine.id
+    assert len(payload["results"]) == 2
+    assert payload["results"][0]["status"] == "success"
+    assert payload["results"][0]["type"] == "custom"
+    assert payload["results"][1]["status"] == "success"
+    assert payload["results"][1]["input_text"] == "654321"
+    assert fake_page.fills == [("#otp-input", "654321")]
+
+    assert captured["flow_id"] == flow.id
+    assert captured["payload"].parameters == {"user": user.email, "session": "abc123"}
+    assert captured["template_variables"]["credentials"]["email"] == user.email
 
 
 def test_wait_action_extracts_duration(

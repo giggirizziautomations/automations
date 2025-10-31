@@ -156,10 +156,33 @@ class PowerBIExportRecord(Base):
     )
 
 
+class PowerAutomateFlow(Base):
+    """Power Automate flow configuration segregated per user."""
+
+    __tablename__ = "power_automate_flows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    method = Column(String(10), nullable=False, default="POST")
+    url = Column(String(2048), nullable=False)
+    body_template = Column(JSON, nullable=False, default=dict)
+    headers = Column(JSON, nullable=False, default=dict)
+    timeout_seconds = Column(Integer, nullable=False, default=1800)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
 __all__ = [
     "User",
     "ClientApp",
     "ScrapingRoutine",
     "PowerBIServiceConfig",
     "PowerBIExportRecord",
+    "PowerAutomateFlow",
 ]
