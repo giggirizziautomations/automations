@@ -106,7 +106,7 @@ class PowerBIServiceConfig(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     report_url = Column(String(2048), nullable=False)
-    export_format = Column(String(20), nullable=False, default="csv")
+    export_format = Column(String(20), nullable=False, default="xlsx")
     merge_strategy = Column(String(20), nullable=False, default="append")
     username = Column(String(255), nullable=True)
     password_encrypted = Column(Text, nullable=True)
