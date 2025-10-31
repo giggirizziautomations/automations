@@ -11,6 +11,7 @@ from app.schemas.power_bi import (
     PowerBIConfigResponse,
     PowerBIExportResponse,
     PowerBIRunRequest,
+    PowerBIScrapingRoutineRequest,
 )
 from app.services import power_bi as power_bi_service
 
@@ -65,6 +66,29 @@ def trigger_power_bi_run(
         return power_bi_service.run_export(db=db, payload=payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.patch(
+    "/config/scraping-actions",
+    response_model=PowerBIConfigResponse,
+    dependencies=[Depends(require_admin_or_scopes(["bi"]))],
+)
+def patch_power_bi_scraping_actions(
+    payload: PowerBIScrapingRoutineRequest,
+    db: Session = Depends(get_db),
+) -> PowerBIConfigResponse:
+    """Import scraping actions from an existing scraping routine."""
+
+    try:
+        return power_bi_service.apply_scraping_routine(
+            db=db, routine_id=payload.routine_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 
 @router.get(

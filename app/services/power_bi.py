@@ -86,7 +86,7 @@ def upsert_configuration(
     if config is None:
         config = models.PowerBIServiceConfig(
             report_url=str(payload.report_url),
-            export_format=payload.export_format,
+            export_format="xlsx",
             merge_strategy=payload.merge_strategy,
             username=payload.username,
             scraping_actions=_dump_scraping_actions(payload.scraping_actions),
@@ -96,12 +96,42 @@ def upsert_configuration(
         db.add(config)
     else:
         config.report_url = str(payload.report_url)
-        config.export_format = payload.export_format
+        config.export_format = "xlsx"
         config.merge_strategy = payload.merge_strategy
         config.username = payload.username
         if payload.password:
             config.password_encrypted = encrypt_str(payload.password)
         config.scraping_actions = _dump_scraping_actions(payload.scraping_actions)
+    db.commit()
+    db.refresh(config)
+    return serialize_config(config)
+
+
+def _load_routine_with_actions(
+    db: Session, routine_id: int
+) -> tuple[models.ScrapingRoutine, list[ScrapingAction]]:
+    routine = (
+        db.query(models.ScrapingRoutine)
+        .filter(models.ScrapingRoutine.id == routine_id)
+        .first()
+    )
+    if routine is None:
+        raise LookupError("Scraping routine not found")
+    actions = [ScrapingAction.model_validate(item) for item in routine.get_actions()]
+    return routine, actions
+
+
+def apply_scraping_routine(*, db: Session, routine_id: int) -> PowerBIConfigResponse:
+    """Copy actions from a scraping routine into the Power BI configuration."""
+
+    config = get_configuration(db)
+    if config is None:
+        raise ValueError("Power BI service configuration is missing")
+
+    routine, actions = _load_routine_with_actions(db, routine_id)
+    config.scraping_actions = _dump_scraping_actions(actions)
+    config.export_format = "xlsx"
+    db.add(config)
     db.commit()
     db.refresh(config)
     return serialize_config(config)
@@ -114,6 +144,8 @@ def run_export(*, db: Session, payload: PowerBIRunRequest) -> PowerBIExportRespo
     if config is None:
         raise ValueError("Power BI service configuration is missing")
 
+    routine, routine_actions = _load_routine_with_actions(db, payload.routine_id)
+
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     prepared_payload = {
         "vin": payload.vin,
@@ -121,9 +153,11 @@ def run_export(*, db: Session, payload: PowerBIRunRequest) -> PowerBIExportRespo
         "merge_strategy": config.merge_strategy,
         "export_format": config.export_format,
         "generated_at": now.isoformat(),
+        "routine_id": routine.id,
+        "routine_url": routine.url,
+        "routine_mode": routine.mode,
         "scraping_actions": [
-            action.model_dump(mode="json")
-            for action in _load_scraping_actions(config.scraping_actions)
+            action.model_dump(mode="json") for action in routine_actions
         ],
     }
 
@@ -174,6 +208,7 @@ def search_exports_by_vin(db: Session, vin: str) -> list[PowerBIExportResponse]:
 
 
 __all__ = [
+    "apply_scraping_routine",
     "get_configuration",
     "list_exports",
     "run_export",

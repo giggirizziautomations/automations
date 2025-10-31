@@ -14,7 +14,7 @@ class PowerBIConfigRequest(BaseModel):
 
     report_url: AnyHttpUrl = Field(description="Public URL of the Power BI report")
     export_format: Literal["csv", "xlsx", "json"] = Field(
-        default="csv", description="Format used when exporting the report"
+        default="xlsx", description="Format used when exporting the report"
     )
     merge_strategy: Literal["append", "replace"] = Field(
         default="append", description="Strategy used when merging downloaded data"
@@ -69,6 +69,17 @@ class PowerBIRunRequest(BaseModel):
     notes: str | None = Field(
         default=None, description="Free form notes stored alongside the export"
     )
+    routine_id: int = Field(
+        description="Identifier of the scraping routine to execute before export"
+    )
+
+
+class PowerBIScrapingRoutineRequest(BaseModel):
+    """Request body when associating a scraping routine with the Power BI config."""
+
+    routine_id: int = Field(
+        description="Identifier of the scraping routine containing the actions"
+    )
 
 
 class PowerBIExportResponse(BaseModel):
@@ -91,4 +102,5 @@ __all__ = [
     "PowerBIConfigResponse",
     "PowerBIRunRequest",
     "PowerBIExportResponse",
+    "PowerBIScrapingRoutineRequest",
 ]
