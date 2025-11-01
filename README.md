@@ -291,6 +291,11 @@ rieseguite. I dataset scaricati vengono fusi utilizzando il parametro di dedupli
 indicato (`dedup_parameter`) e il risultato viene salvato in un database DuckDB per le
 interrogazioni amministrative successive.
 
+> ℹ️ **Allineamento con `exporter_mt`:** la query utilizzata per scaricare i file viene
+> eseguita riusando la stessa logica impiegata da `exporter_mt`, in modo da garantire
+> piena parità di comportamento tra gli esportatori e semplificare la manutenzione di
+> filtri e parametri condivisi.
+
 ### Configurazione del servizio
 
 1. Autenticati con un utente dotato dello scope `bi` oppure con un amministratore.
