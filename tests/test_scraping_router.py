@@ -108,6 +108,31 @@ def test_preview_generates_structured_action(
     assert data["metadata"]["raw_instruction"] == "Click the login button"
 
 
+def test_preview_can_request_label_storage(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    password = "secret123"
+    user = _create_user(db_session=db_session, password=password)
+    headers = _auth_headers(api_client, email=user.email, password=password)
+
+    response = api_client.post(
+        "/scraping/actions/preview",
+        json={
+            "instruction": "Fill the email field",
+            "html_snippet": "<input id='email-field' aria-label='Email address' />",
+            "store_label_as": "labels.email",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["type"] == "fill"
+    assert data["metadata"]["label"] == "Email address"
+    assert data["metadata"]["store_label_as"] == "labels.email"
+
+
 def test_preview_accepts_html_with_double_quotes(
     api_client: TestClient,
     db_session: Session,
@@ -181,6 +206,39 @@ def test_append_and_patch_actions(
     assert patched["actions"][0]["input_text"] == "demo@example.com"
     assert patched["actions"][0]["metadata"]["label"] is None
     assert patched["actions"][0]["metadata"]["confidence"] == 0.95
+
+
+def test_append_action_allows_label_storage(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    password = "secret123"
+    user = _create_user(db_session=db_session, password=password)
+    headers = _auth_headers(api_client, email=user.email, password=password)
+
+    create_response = api_client.post(
+        "/scraping/routines",
+        json={"url": "https://example.com/form", "mode": "headless"},
+        headers=headers,
+    )
+    routine_id = create_response.json()["id"]
+
+    append_response = api_client.post(
+        f"/scraping/routines/{routine_id}/actions",
+        json={
+            "instruction": "Fill the email field",
+            "html_snippet": "<input id='email-field' aria-label='Email address' />",
+            "store_label_as": " labels.email ",
+        },
+        headers=headers,
+    )
+
+    assert append_response.status_code == 200
+    payload = append_response.json()
+    assert len(payload["actions"]) == 1
+    metadata = payload["actions"][0]["metadata"]
+    assert metadata["label"] == "Email address"
+    assert metadata["store_label_as"] == "labels.email"
 
 
 def test_execute_routine_triggers_power_automate_flow(
@@ -298,6 +356,118 @@ def test_execute_routine_triggers_power_automate_flow(
     assert captured["flow_id"] == flow.id
     assert captured["payload"].parameters == {"user": user.email, "session": "abc123"}
     assert captured["template_variables"]["credentials"]["email"] == user.email
+
+
+def test_execute_routine_exposes_label_in_context(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    password = "secret123"
+    user = _create_user(db_session=db_session, password=password)
+    headers = _auth_headers(api_client, email=user.email, password=password)
+
+    flow = models.PowerAutomateFlow(
+        user_id=user.id,
+        name="Send label",
+        method="POST",
+        url="https://flow.example.com/label",
+        body_template={},
+        headers={},
+    )
+    db_session.add(flow)
+    db_session.commit()
+
+    fill_action = generate_scraping_action(
+        "Fill the email field",
+        "<input id='email-field' type='email' aria-label='Email address' />",
+    )
+    fill_action["metadata"]["store_label_as"] = "labels.email"
+
+    actions = [
+        fill_action,
+        {
+            "type": "custom",
+            "selector": "",
+            "description": "Send context to flow",
+            "metadata": {
+                "power_automate_flow_id": flow.id,
+                "parameters": {"field_label": "{{context.labels.email}}"},
+            },
+        },
+    ]
+
+    routine = models.ScrapingRoutine(
+        user_id=user.id,
+        url="https://example.com/form",
+        mode="headless",
+        email=user.email,
+        password_encrypted=security.encrypt_str("Password123"),
+        actions=actions,
+    )
+    db_session.add(routine)
+    db_session.commit()
+
+    captured: dict[str, Any] = {}
+
+    async def fake_invoke_flow(**kwargs: Any) -> PowerAutomateInvocationResult:
+        captured.update(kwargs)
+        return PowerAutomateInvocationResult(
+            flow_id=kwargs["flow_id"],
+            status="success",
+            http_status=200,
+            response={},
+            detail=None,
+            failure_flow_triggered=False,
+        )
+
+    monkeypatch.setattr("app.services.power_automate.invoke_flow", fake_invoke_flow)
+
+    class FillPage:
+        def __init__(self) -> None:
+            self.current_url = "https://example.com/form"
+            self.fills: list[tuple[str, str]] = []
+
+        @property
+        def url(self) -> str:
+            return self.current_url
+
+        async def goto(self, url: str, *, wait_until: str = "networkidle") -> None:
+            self.current_url = url
+
+        async def click(self, selector: str) -> None:  # pragma: no cover - unused
+            return None
+
+        async def fill(self, selector: str, value: str) -> None:
+            self.fills.append((selector, value))
+
+        async def select_option(self, selector: str, value: str) -> None:  # pragma: no cover
+            return None
+
+        async def wait_for_timeout(self, timeout: float) -> None:  # pragma: no cover
+            return None
+
+        async def evaluate(self, expression: str) -> None:  # pragma: no cover - unused
+            return None
+
+    fill_page = FillPage()
+    monkeypatch.setattr(
+        "app.routers.scraping.get_active_page", lambda *args, **kwargs: fill_page
+    )
+
+    response = api_client.post(
+        f"/scraping/routines/{routine.id}/execute",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert fill_page.fills == [("#email-field", user.email)]
+    assert captured["flow_id"] == flow.id
+    assert captured["payload"].parameters == {"field_label": "Email address"}
+    assert (
+        captured["template_variables"]["context"]["labels"]["email"]
+        == "Email address"
+    )
 
 
 def test_action_reads_text_and_passes_to_flow(
