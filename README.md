@@ -229,6 +229,9 @@ endpoint dedicati. Imposta nel campo `metadata` dell'azione le seguenti chiavi:
 - `store_response_fields`: mappa percorsi della risposta (`otp`, `details.code`, …) verso
   chiavi del contesto (`mfa.code`, `session.token`, …). I valori salvati possono essere
   riutilizzati nelle azioni successive tramite `metadata.context_key`.
+- `store_text_as`: disponibile su qualsiasi azione, legge il testo dell'elemento
+  individuato dal selettore e lo salva nel contesto (es. `labels.submit`). Il valore
+  estratto viene riportato anche nella risposta dell'esecuzione come `captured_text`.
 
 Durante l'esecuzione, la routine espone al templating le seguenti variabili:
 

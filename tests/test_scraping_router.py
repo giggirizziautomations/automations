@@ -1,6 +1,7 @@
 """Tests for the scraping instruction endpoints."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -297,6 +298,123 @@ def test_execute_routine_triggers_power_automate_flow(
     assert captured["flow_id"] == flow.id
     assert captured["payload"].parameters == {"user": user.email, "session": "abc123"}
     assert captured["template_variables"]["credentials"]["email"] == user.email
+
+
+def test_action_reads_text_and_passes_to_flow(
+    api_client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    password = "secret123"
+    user = _create_user(db_session=db_session, password=password)
+    headers = _auth_headers(api_client, email=user.email, password=password)
+
+    flow = models.PowerAutomateFlow(
+        user_id=user.id,
+        name="Capture label",
+        method="POST",
+        url="https://flow.example.com/capture",
+        body_template={},
+        headers={},
+    )
+    db_session.add(flow)
+    db_session.commit()
+
+    actions: list[dict[str, Any]] = [
+        {
+            "type": "click",
+            "selector": "#submit-button",
+            "description": "Read button label",
+            "metadata": {"store_text_as": "labels.submit"},
+        },
+        {
+            "type": "custom",
+            "selector": "",
+            "description": "Send label to flow",
+            "metadata": {
+                "power_automate_flow_id": flow.id,
+                "parameters": {"button_label": "{{context.labels.submit}}"},
+            },
+        },
+    ]
+
+    routine = models.ScrapingRoutine(
+        user_id=user.id,
+        url="https://example.com/form",
+        mode="headless",
+        email=user.email,
+        password_encrypted=security.encrypt_str("Password123"),
+        actions=actions,
+    )
+    db_session.add(routine)
+    db_session.commit()
+
+    captured: dict[str, Any] = {}
+
+    async def fake_invoke_flow(**kwargs: Any) -> PowerAutomateInvocationResult:
+        captured.update(kwargs)
+        return PowerAutomateInvocationResult(
+            flow_id=kwargs["flow_id"],
+            status="success",
+            http_status=200,
+            response={"ok": True},
+            detail=None,
+            failure_flow_triggered=False,
+        )
+
+    monkeypatch.setattr("app.services.power_automate.invoke_flow", fake_invoke_flow)
+
+    class TextPage:
+        def __init__(self) -> None:
+            self.current_url = "https://example.com/form"
+            self.clicks: list[str] = []
+            self.evaluations: list[str] = []
+
+        @property
+        def url(self) -> str:
+            return self.current_url
+
+        async def goto(self, url: str, *, wait_until: str = "networkidle") -> None:
+            self.current_url = url
+
+        async def click(self, selector: str) -> None:
+            self.clicks.append(selector)
+
+        async def fill(self, selector: str, value: str) -> None:  # pragma: no cover - unused
+            return None
+
+        async def select_option(self, selector: str, value: str) -> None:  # pragma: no cover
+            return None
+
+        async def wait_for_timeout(self, timeout: float) -> None:  # pragma: no cover
+            return None
+
+        async def evaluate(self, expression: str) -> str | None:
+            self.evaluations.append(expression)
+            selector_literal = json.dumps("#submit-button")
+            if selector_literal in expression:
+                return "Submit order"
+            return None
+
+    text_page = TextPage()
+    monkeypatch.setattr(
+        "app.routers.scraping.get_active_page", lambda *args, **kwargs: text_page
+    )
+
+    response = api_client.post(
+        f"/scraping/routines/{routine.id}/execute",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["results"][0]["status"] == "success"
+    assert payload["results"][0]["captured_text"] == "Submit order"
+    assert text_page.clicks == ["#submit-button"]
+
+    assert captured["flow_id"] == flow.id
+    assert captured["payload"].parameters == {"button_label": "Submit order"}
+    assert captured["template_variables"]["context"]["labels"]["submit"] == "Submit order"
 
 
 def test_wait_action_extracts_duration(
