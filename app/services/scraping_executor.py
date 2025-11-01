@@ -1,6 +1,7 @@
 """Execute scraping routines against an active Playwright page."""
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
@@ -99,6 +100,20 @@ def _merge_context(target: dict[str, Any], updates: dict[str, Any]) -> None:
             target[key] = value
 
 
+def _assign_context_value(context: dict[str, Any], path: str, value: Any) -> None:
+    parts = [chunk.strip() for chunk in path.split(".") if chunk.strip()]
+    if not parts:
+        return
+    cursor = context
+    for chunk in parts[:-1]:
+        existing = cursor.get(chunk)
+        if not isinstance(existing, dict):
+            existing = {}
+            cursor[chunk] = existing
+        cursor = existing
+    cursor[parts[-1]] = value
+
+
 def _resolve_input_value(
     action: ScrapingAction,
     credentials: RoutineCredentials,
@@ -188,9 +203,56 @@ async def _execute_single_action(
     status = "success"
     detail: str | None = None
     used_input: str | None = None
+    captured_text: str | None = None
+
+    metadata = action.metadata or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    store_text_raw = metadata.get("store_text_as")
+    store_text_path = (
+        store_text_raw.strip() if isinstance(store_text_raw, str) and store_text_raw.strip() else None
+    )
 
     try:
+        async def _capture_text() -> None:
+            nonlocal captured_text, status, detail
+            if not store_text_path or not action.selector:
+                return
+            script = f"""
+(() => {{
+    const element = document.querySelector({json.dumps(action.selector)});
+    if (!element) {{
+        return null;
+    }}
+    const text = element.innerText ?? element.textContent;
+    if (typeof text !== 'string') {{
+        return null;
+    }}
+    const trimmed = text.trim();
+    return trimmed.length ? trimmed : null;
+}})()
+"""
+            try:
+                result = await page.evaluate(script)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.exception(
+                    "Failed to read text for selector %s", action.selector
+                )
+                if status == "success":
+                    status = "error"
+                    detail = f"Failed to read text content: {exc}"
+                return
+            if result is None:
+                if status == "success":
+                    status = "error"
+                    detail = "No text content available for selector"
+                return
+            captured_text = str(result)
+            _assign_context_value(context, store_text_path, captured_text)
+
         if action.type == "click":
+            await _capture_text()
             await page.click(action.selector)
         elif action.type == "fill":
             used_input = _resolve_input_value(action, credentials, context)
@@ -198,6 +260,7 @@ async def _execute_single_action(
                 status = "skipped"
                 detail = "No value available for fill action"
             else:
+                await _capture_text()
                 await page.fill(action.selector, used_input)
         elif action.type == "select":
             used_input = _resolve_select_value(action, credentials, context)
@@ -205,11 +268,14 @@ async def _execute_single_action(
                 status = "skipped"
                 detail = "No option value available for select action"
             else:
+                await _capture_text()
                 await page.select_option(action.selector, used_input)
         elif action.type == "wait":
+            await _capture_text()
             timeout_ms = _resolve_wait_timeout(action)
             await page.wait_for_timeout(timeout_ms)
         else:  # custom or other
+            await _capture_text()
             handled = False
             if custom_action_handler is not None:
                 custom_result = await custom_action_handler(action, credentials, context)
@@ -240,6 +306,7 @@ async def _execute_single_action(
         "status": status,
         "detail": detail,
         "input_text": used_input,
+        "captured_text": captured_text,
     }
 
 

@@ -65,6 +65,7 @@ class ScrapingStepResult(BaseModel):
     status: Literal["success", "error", "skipped"]
     detail: str | None = None
     input_text: str | None = None
+    captured_text: str | None = None
 
 
 class ScrapingExecutionResponse(BaseModel):
