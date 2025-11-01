@@ -89,9 +89,26 @@ def _get_owned_routine(
     return routine
 
 
+def _apply_store_label_option(
+    action: ScrapingAction, store_label_as: str | None
+) -> ScrapingAction:
+    path = store_label_as.strip() if isinstance(store_label_as, str) else None
+    if not path:
+        return action
+
+    metadata = action.metadata or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata = dict(metadata)
+    metadata["store_label_as"] = path
+    action.metadata = metadata
+    return action
+
+
 def _generate_action(payload: ScrapingActionPreviewRequest) -> ScrapingAction:
     raw_action = generate_scraping_action(payload.instruction, payload.html_snippet)
-    return ScrapingAction(**raw_action)
+    action = ScrapingAction(**raw_action)
+    return _apply_store_label_option(action, payload.store_label_as)
 
 
 def _safe_dict(value: Any) -> dict[str, Any]:
@@ -248,6 +265,7 @@ async def append_scraping_action(
     action_payload = ScrapingActionPreviewRequest(
         instruction=payload.instruction,
         html_snippet=payload.html_snippet,
+        store_label_as=payload.store_label_as,
     )
     action = _generate_action(action_payload)
 
@@ -284,6 +302,7 @@ async def patch_scraping_action(
     action_payload = ScrapingActionPreviewRequest(
         instruction=payload.instruction,
         html_snippet=payload.html_snippet,
+        store_label_as=payload.store_label_as,
     )
     action = _generate_action(action_payload)
     actions[action_index] = action.model_dump()

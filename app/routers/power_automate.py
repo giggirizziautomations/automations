@@ -8,7 +8,6 @@ from app.core.auth import get_current_user
 from app.db import models
 from app.db.base import get_db
 from app.schemas.power_automate import (
-    PowerAutomateFlowLoadRequest,
     PowerAutomateFlowRequest,
     PowerAutomateFlowResponse,
     PowerAutomateInvocationRequest,
@@ -43,27 +42,6 @@ def create_flow(
 
     try:
         return power_automate_service.create_flow(db=db, user_id=user.id, payload=payload)
-    except ValueError as exc:  # pragma: no cover - validation guard
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.post(
-    "/flows/load",
-    response_model=list[PowerAutomateFlowResponse],
-)
-def load_flows(
-    payload: PowerAutomateFlowLoadRequest,
-    user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> list[PowerAutomateFlowResponse]:
-    """Bulk load or upsert flow definitions for the authenticated user."""
-
-    try:
-        return power_automate_service.load_flows(
-            db=db,
-            user_id=user.id,
-            payload=payload,
-        )
     except ValueError as exc:  # pragma: no cover - validation guard
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

@@ -214,6 +214,21 @@ async def _execute_single_action(
         store_text_raw.strip() if isinstance(store_text_raw, str) and store_text_raw.strip() else None
     )
 
+    store_label_raw = metadata.get("store_label_as")
+    store_label_path = (
+        store_label_raw.strip()
+        if isinstance(store_label_raw, str) and store_label_raw.strip()
+        else None
+    )
+    label_value_raw = metadata.get("label")
+    label_value = (
+        label_value_raw.strip()
+        if isinstance(label_value_raw, str) and label_value_raw.strip()
+        else None
+    )
+    if store_label_path and label_value:
+        _assign_context_value(context, store_label_path, label_value)
+
     try:
         async def _capture_text() -> None:
             nonlocal captured_text, status, detail

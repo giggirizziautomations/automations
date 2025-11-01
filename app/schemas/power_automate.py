@@ -38,14 +38,6 @@ class PowerAutomateFlowResponse(PowerAutomateFlowBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class PowerAutomateFlowLoadRequest(BaseModel):
-    """Bulk loading payload for user Power Automate flows."""
-
-    flows: list[PowerAutomateFlowRequest] = Field(default_factory=list)
-
-    model_config = ConfigDict(extra="forbid")
-
-
 class PowerAutomateInvocationRequest(BaseModel):
     """Parameters supplied when invoking a Power Automate flow."""
 
@@ -77,7 +69,6 @@ class PowerAutomateInvocationResponse(BaseModel):
 
 __all__ = [
     "PowerAutomateFlowRequest",
-    "PowerAutomateFlowLoadRequest",
     "PowerAutomateFlowResponse",
     "PowerAutomateInvocationRequest",
     "PowerAutomateInvocationResponse",

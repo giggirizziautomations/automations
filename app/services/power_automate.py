@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from app.db import models
 from app.schemas.power_automate import (
-    PowerAutomateFlowLoadRequest,
     PowerAutomateFlowRequest,
     PowerAutomateFlowResponse,
     PowerAutomateInvocationRequest,
@@ -154,52 +153,6 @@ def create_flow(*, db: Session, user_id: int, payload: PowerAutomateFlowRequest)
     db.commit()
     db.refresh(flow)
     return _serialise_flow(flow)
-
-
-def load_flows(
-    *,
-    db: Session,
-    user_id: int,
-    payload: PowerAutomateFlowLoadRequest,
-) -> list[PowerAutomateFlowResponse]:
-    """Bulk load flows into the database, upserting by name."""
-
-    existing_flows = (
-        db.query(models.PowerAutomateFlow)
-        .filter(models.PowerAutomateFlow.user_id == user_id)
-        .all()
-    )
-    existing_by_name = {flow.name: flow for flow in existing_flows}
-
-    stored: list[models.PowerAutomateFlow] = []
-    for flow_payload in payload.flows:
-        timeout = _resolve_timeout(flow_payload, 1800)
-        flow = existing_by_name.get(flow_payload.name)
-        if flow is None:
-            flow = models.PowerAutomateFlow(
-                user_id=user_id,
-                name=flow_payload.name,
-                url=str(flow_payload.url),
-                method=flow_payload.method.upper(),
-                timeout_seconds=timeout,
-                headers=dict(flow_payload.headers or {}),
-                body_template=dict(flow_payload.body_template or {}),
-            )
-            db.add(flow)
-            existing_by_name[flow_payload.name] = flow
-        else:
-            flow.url = str(flow_payload.url)
-            flow.method = flow_payload.method.upper()
-            flow.timeout_seconds = timeout
-            flow.headers = dict(flow_payload.headers or {})
-            flow.body_template = dict(flow_payload.body_template or {})
-        stored.append(flow)
-
-    db.commit()
-    for flow in stored:
-        db.refresh(flow)
-
-    return [_serialise_flow(flow) for flow in stored]
 
 
 def _get_flow(*, db: Session, user_id: int, flow_id: int) -> models.PowerAutomateFlow:
