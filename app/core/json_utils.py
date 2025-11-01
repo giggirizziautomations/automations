@@ -7,12 +7,12 @@ import json
 
 
 def _escape_html_snippet_field(data: str) -> str:
-    """Escape unescaped double quotes inside the ``html_snippet`` field.
+    """Normalise the ``html_snippet`` field so the payload is valid JSON.
 
-    Some clients submit HTML fragments that contain double quotes without
-    escaping them for JSON (e.g. ``data-bind="text: value"``). The FastAPI JSON
-    decoder rejects these payloads, so we detect the ``html_snippet`` field and
-    escape interior quotes while leaving the terminating quote untouched.
+    A number of clients submit HTML fragments that contain raw double quotes and
+    literal line breaks. Both are invalid inside JSON strings, so we sanitise the
+    ``html_snippet`` value by escaping interior quotes and replacing unescaped
+    newlines before handing the payload to :func:`json.loads`.
     """
 
     marker = '"html_snippet": "'
@@ -20,33 +20,53 @@ def _escape_html_snippet_field(data: str) -> str:
     if start == -1:
         return data
 
-    # Convert to a list for easier in-place manipulation.
-    chars = list(data)
-    index = start + len(marker)
-    while index < len(chars):
-        char = chars[index]
+    prefix_end = start + len(marker)
+    result: list[str] = [data[:prefix_end]]
+    index = prefix_end
+    length = len(data)
+
+    while index < length:
+        char = data[index]
+
+        if char == "\\":
+            # Preserve existing escape sequences.
+            result.append("\\")
+            index += 1
+            if index < length:
+                result.append(data[index])
+                index += 1
+            continue
+
         if char == '"':
             # Look ahead to determine whether this quote terminates the value.
             lookahead = index + 1
-            while lookahead < len(chars) and chars[lookahead].isspace():
+            while lookahead < length and data[lookahead] in " \t\r\n":
                 lookahead += 1
 
-            if lookahead >= len(chars):
-                # We reached the end of the payload. Escape the quote and exit.
-                chars.insert(index, "\\")
-                break
+            if lookahead >= length or data[lookahead] in ",}]":
+                result.append('"')
+                result.append(data[index + 1 :])
+                return "".join(result)
 
-            if chars[lookahead] in ",}]":
-                # The quote terminates the JSON string value; keep it as-is.
-                break
-
-            # This is an interior quote belonging to the HTML snippet. Escape it
-            # so that ``json.loads`` accepts the payload.
-            chars.insert(index, "\\")
+            # Interior quote belonging to the HTML snippet -> escape it.
+            result.append("\\\"")
             index += 1
+            continue
+
+        if char == "\n":
+            result.append("\\n")
+            index += 1
+            continue
+
+        if char == "\r":
+            result.append("\\r")
+            index += 1
+            continue
+
+        result.append(char)
         index += 1
 
-    return "".join(chars)
+    return data
 
 
 def relaxed_json_loads(data: str, /) -> Any:
@@ -54,7 +74,7 @@ def relaxed_json_loads(data: str, /) -> Any:
 
     The loader first attempts to parse the payload using ``json.loads``. When
     decoding fails we try to sanitise the ``html_snippet`` field by escaping
-    problematic quotes before retrying.
+    problematic quotes and normalising raw newlines before retrying.
     """
 
     try:
