@@ -108,6 +108,29 @@ def test_preview_generates_structured_action(
     assert data["metadata"]["raw_instruction"] == "Click the login button"
 
 
+def test_preview_includes_store_text_metadata(
+    api_client: TestClient,
+    db_session: Session,
+) -> None:
+    password = "secret123"
+    user = _create_user(db_session=db_session, password=password)
+    headers = _auth_headers(api_client, email=user.email, password=password)
+
+    response = api_client.post(
+        "/scraping/actions/preview",
+        json={
+            "instruction": "Read the MFA label",
+            "html_snippet": "<div id='idRichContext_DisplaySign'>44</div>",
+            "store_text_as": "labels.display_sign",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metadata"]["store_text_as"] == "labels.display_sign"
+
+
 def test_preview_accepts_html_with_double_quotes(
     api_client: TestClient,
     db_session: Session,
@@ -154,6 +177,7 @@ def test_append_and_patch_actions(
         json={
             "instruction": "Click the login button",
             "html_snippet": "<button id='login-btn'>Login</button>",
+            "store_text_as": "labels.login",
         },
         headers=headers,
     )
@@ -162,6 +186,7 @@ def test_append_and_patch_actions(
     data = append_response.json()
     assert len(data["actions"]) == 1
     assert data["actions"][0]["selector"] == "#login-btn"
+    assert data["actions"][0]["metadata"]["store_text_as"] == "labels.login"
 
 
     patch_response = api_client.patch(

@@ -233,6 +233,73 @@ endpoint dedicati. Imposta nel campo `metadata` dell'azione le seguenti chiavi:
   individuato dal selettore e lo salva nel contesto (es. `labels.submit`). Il valore
   estratto viene riportato anche nella risposta dell'esecuzione come `captured_text`.
 
+#### Esempio: riutilizzare un'etichetta HTML in un'azione custom
+
+Quando si ha bisogno di passare al flow un'etichetta visibile sulla pagina (ad esempio
+il testo di un pulsante), è sufficiente aggiungere un'azione preliminare che salvi il
+contenuto in una chiave del contesto e, successivamente, richiamarla tramite i
+placeholder del motore di templating.
+
+1. Aggiungi un'azione qualsiasi (tipicamente `click` o `hover`) e imposta
+   `metadata.store_text_as` con il percorso desiderato del contesto. L'azione seguente
+   salva il testo del pulsante dentro `context.labels.submit`:
+
+   ```json
+   {
+     "type": "click",
+     "selector": "button[data-testid='submit-order']",
+     "description": "Clicca il pulsante di invio",
+     "metadata": {
+       "store_text_as": "labels.submit"
+     }
+   }
+   ```
+
+   Se l'etichetta arriva da un `<div>` informativo come
+   
+   ```html
+   <div tabindex="0" aria-labelledby="idDiv_SAOTCAS_Description idRichContext_DisplaySign" id="idRichContext_DisplaySign" class="displaySign display-sign-height" data-bind="text: displaySign, hasFocusEx: focusOnSign(), css: { 'display-sign-height': svr.fEnableCenterFocusedApprovalNumber }">44</div>
+   ```
+
+   puoi usare lo stesso approccio puntando al selettore `#idRichContext_DisplaySign`.
+   Il valore `44` è solo un esempio: durante l'esecuzione l'automazione leggerà sempre
+   il testo presente in quel nodo, anche se cambia tra una sessione e l'altra.
+
+   ```json
+   {
+     "type": "custom",
+     "selector": "#idRichContext_DisplaySign",
+     "description": "Salva il codice visualizzato",
+     "metadata": {
+       "store_text_as": "labels.display_sign"
+     }
+   }
+   ```
+
+   Questo permette di riutilizzare il codice MFA visualizzato dalla pagina senza
+   dover conoscere in anticipo il valore effettivo.
+
+2. All'interno dell'azione custom imposta i parametri (o il corpo/override) usando il
+   placeholder `{{context.labels.submit}}`, che verrà sostituito con il valore salvato
+   dall'azione precedente:
+
+   ```json
+   {
+     "type": "custom",
+     "description": "Invia etichetta del pulsante al flow",
+     "metadata": {
+       "power_automate_flow_id": 42,
+       "parameters": {
+         "button_label": "{{context.labels.submit}}"
+       }
+     }
+   }
+   ```
+
+Durante l'esecuzione della routine, il motore catturerà il testo del pulsante, lo
+riporterà nella risposta come `captured_text` e popolerà `context.labels.submit`, così
+da poterlo riutilizzare in qualunque azione successiva (custom o standard).
+
 Durante l'esecuzione, la routine espone al templating le seguenti variabili:
 
 - `credentials.email` / `credentials.password`: le credenziali associate alla routine.
@@ -412,7 +479,12 @@ la sessione.
            "html_snippet": "<input id=\"email\" name=\"email\" placeholder=\"Email\" />"
          }' \
      http://localhost:8000/scraping/actions/preview
-   ```
+  ```
+
+   Se desideri che l'azione salvi automaticamente il testo dell'elemento appena generato,
+   aggiungi il campo opzionale `"store_text_as" : "labels.display_sign"`. Il selettore
+   scelto verrà rivalutato a runtime e il contenuto testuale verrà scritto in
+   `context.labels.display_sign`.
 
 3. **Append**
 
@@ -422,7 +494,8 @@ la sessione.
      -H "Content-Type: application/json" \
      -d '{
            "instruction": "Fill the email field with \"demo@example.com\"",
-           "html_snippet": "<input id=\"email\" name=\"email\" placeholder=\"Email\" />"
+           "html_snippet": "<input id=\"email\" name=\"email\" placeholder=\"Email\" />",
+           "store_text_as": "labels.email"
          }' \
      http://localhost:8000/scraping/routines/1/actions
    ```

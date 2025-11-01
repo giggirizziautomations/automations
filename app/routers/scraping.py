@@ -90,7 +90,9 @@ def _get_owned_routine(
 
 
 def _generate_action(payload: ScrapingActionPreviewRequest) -> ScrapingAction:
-    raw_action = generate_scraping_action(payload.instruction, payload.html_snippet)
+    raw_action = generate_scraping_action(
+        payload.instruction, payload.html_snippet, payload.store_text_as
+    )
     return ScrapingAction(**raw_action)
 
 
@@ -248,6 +250,7 @@ async def append_scraping_action(
     action_payload = ScrapingActionPreviewRequest(
         instruction=payload.instruction,
         html_snippet=payload.html_snippet,
+        store_text_as=payload.store_text_as,
     )
     action = _generate_action(action_payload)
 
@@ -284,6 +287,7 @@ async def patch_scraping_action(
     action_payload = ScrapingActionPreviewRequest(
         instruction=payload.instruction,
         html_snippet=payload.html_snippet,
+        store_text_as=payload.store_text_as,
     )
     action = _generate_action(action_payload)
     actions[action_index] = action.model_dump()
