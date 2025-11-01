@@ -233,6 +233,49 @@ endpoint dedicati. Imposta nel campo `metadata` dell'azione le seguenti chiavi:
   individuato dal selettore e lo salva nel contesto (es. `labels.submit`). Il valore
   estratto viene riportato anche nella risposta dell'esecuzione come `captured_text`.
 
+#### Esempio: riutilizzare un'etichetta HTML in un'azione custom
+
+Quando si ha bisogno di passare al flow un'etichetta visibile sulla pagina (ad esempio
+il testo di un pulsante), è sufficiente aggiungere un'azione preliminare che salvi il
+contenuto in una chiave del contesto e, successivamente, richiamarla tramite i
+placeholder del motore di templating.
+
+1. Aggiungi un'azione qualsiasi (tipicamente `click` o `hover`) e imposta
+   `metadata.store_text_as` con il percorso desiderato del contesto. L'azione seguente
+   salva il testo del pulsante dentro `context.labels.submit`:
+
+   ```json
+   {
+     "type": "click",
+     "selector": "button[data-testid='submit-order']",
+     "description": "Clicca il pulsante di invio",
+     "metadata": {
+       "store_text_as": "labels.submit"
+     }
+   }
+   ```
+
+2. All'interno dell'azione custom imposta i parametri (o il corpo/override) usando il
+   placeholder `{{context.labels.submit}}`, che verrà sostituito con il valore salvato
+   dall'azione precedente:
+
+   ```json
+   {
+     "type": "custom",
+     "description": "Invia etichetta del pulsante al flow",
+     "metadata": {
+       "power_automate_flow_id": 42,
+       "parameters": {
+         "button_label": "{{context.labels.submit}}"
+       }
+     }
+   }
+   ```
+
+Durante l'esecuzione della routine, il motore catturerà il testo del pulsante, lo
+riporterà nella risposta come `captured_text` e popolerà `context.labels.submit`, così
+da poterlo riutilizzare in qualunque azione successiva (custom o standard).
+
 Durante l'esecuzione, la routine espone al templating le seguenti variabili:
 
 - `credentials.email` / `credentials.password`: le credenziali associate alla routine.
