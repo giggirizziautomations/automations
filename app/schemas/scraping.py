@@ -24,6 +24,7 @@ class ScrapingActionPreviewRequest(BaseModel):
 
     instruction: str = Field(..., min_length=1)
     html_snippet: str = Field(..., min_length=1)
+    store_text_as: str | None = Field(default=None, min_length=1)
 
 
 class ScrapingRoutineCreateRequest(BaseModel):
@@ -54,6 +55,7 @@ class ScrapingActionMutationRequest(BaseModel):
 
     instruction: str = Field(..., min_length=1)
     html_snippet: str = Field(..., min_length=1)
+    store_text_as: str | None = Field(default=None, min_length=1)
 
 
 class ScrapingStepResult(BaseModel):

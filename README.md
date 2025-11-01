@@ -255,6 +255,30 @@ placeholder del motore di templating.
    }
    ```
 
+   Se l'etichetta arriva da un `<div>` informativo come
+   
+   ```html
+   <div tabindex="0" aria-labelledby="idDiv_SAOTCAS_Description idRichContext_DisplaySign" id="idRichContext_DisplaySign" class="displaySign display-sign-height" data-bind="text: displaySign, hasFocusEx: focusOnSign(), css: { 'display-sign-height': svr.fEnableCenterFocusedApprovalNumber }">44</div>
+   ```
+
+   puoi usare lo stesso approccio puntando al selettore `#idRichContext_DisplaySign`.
+   Il valore `44` è solo un esempio: durante l'esecuzione l'automazione leggerà sempre
+   il testo presente in quel nodo, anche se cambia tra una sessione e l'altra.
+
+   ```json
+   {
+     "type": "custom",
+     "selector": "#idRichContext_DisplaySign",
+     "description": "Salva il codice visualizzato",
+     "metadata": {
+       "store_text_as": "labels.display_sign"
+     }
+   }
+   ```
+
+   Questo permette di riutilizzare il codice MFA visualizzato dalla pagina senza
+   dover conoscere in anticipo il valore effettivo.
+
 2. All'interno dell'azione custom imposta i parametri (o il corpo/override) usando il
    placeholder `{{context.labels.submit}}`, che verrà sostituito con il valore salvato
    dall'azione precedente:
@@ -455,7 +479,12 @@ la sessione.
            "html_snippet": "<input id=\"email\" name=\"email\" placeholder=\"Email\" />"
          }' \
      http://localhost:8000/scraping/actions/preview
-   ```
+  ```
+
+   Se desideri che l'azione salvi automaticamente il testo dell'elemento appena generato,
+   aggiungi il campo opzionale `"store_text_as" : "labels.display_sign"`. Il selettore
+   scelto verrà rivalutato a runtime e il contenuto testuale verrà scritto in
+   `context.labels.display_sign`.
 
 3. **Append**
 
@@ -465,7 +494,8 @@ la sessione.
      -H "Content-Type: application/json" \
      -d '{
            "instruction": "Fill the email field with \"demo@example.com\"",
-           "html_snippet": "<input id=\"email\" name=\"email\" placeholder=\"Email\" />"
+           "html_snippet": "<input id=\"email\" name=\"email\" placeholder=\"Email\" />",
+           "store_text_as": "labels.email"
          }' \
      http://localhost:8000/scraping/routines/1/actions
    ```

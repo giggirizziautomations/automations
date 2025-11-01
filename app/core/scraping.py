@@ -159,7 +159,9 @@ def _ensure_metadata_fields(metadata: Dict[str, Any], *, keys: Iterable[str]) ->
         metadata.setdefault(key, None)
 
 
-def generate_scraping_action(instruction: str, html_snippet: str) -> Dict[str, Any]:
+def generate_scraping_action(
+    instruction: str, html_snippet: str, store_text_as: str | None = None
+) -> Dict[str, Any]:
     """Create a structured scraping action from natural language instructions."""
 
     instruction = _normalise_whitespace(instruction.strip())
@@ -199,6 +201,11 @@ def generate_scraping_action(instruction: str, html_snippet: str) -> Dict[str, A
 
     if action_type == "fill" and attributes.get("type", "").lower() == "password":
         metadata["expects_secret"] = True
+
+    if isinstance(store_text_as, str):
+        trimmed_store_key = store_text_as.strip()
+        if trimmed_store_key:
+            metadata["store_text_as"] = trimmed_store_key
 
     action: Dict[str, Any] = {
         "type": action_type,
